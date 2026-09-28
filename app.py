@@ -14,9 +14,9 @@ st.set_page_config(
 # Khởi tạo dữ liệu trong session state
 if "hdv_list" not in st.session_state:
     st.session_state.hdv_list = [
-        {"id": 1, "ten": "Nguyễn Văn A", "chuyen_mon": "Trong nước", "so_ngay_nghi": 4, "ngay_nghi": []},
-        {"id": 2, "ten": "Trần Thị B", "chuyen_mon": "Quốc tế", "so_ngay_nghi": 4, "ngay_nghi": []},
-        {"id": 3, "ten": "Lê Văn C", "chuyen_mon": "Trekking", "so_ngay_nghi": 4, "ngay_nghi": []},
+        {"id": 1, "Tên": "Nguyễn Văn A", "Chuyên môn": "Trong nước", "Số ngày nghỉ": 4, "ngay_nghi": []},
+        {"id": 2, "Tên": "Trần Thị B", "Chuyên môn": "Quốc tế", "Số ngày nghỉ": 4, "ngay_nghi": []},
+        {"id": 3, "Tên": "Lê Văn C", "Chuyên môn": "Trekking", "Số ngày nghỉ": 4, "ngay_nghi": []},
     ]
 
 if "lich_trinh_list" not in st.session_state:
@@ -96,7 +96,7 @@ with st.sidebar:
             })
             st.success(f"Đã thêm {ten_hdv}")
 
-    # Form đăng ký nghỉ phép (TÍNH NĂNG 2)
+    # Form đăng ký nghỉ phép 
     with st.expander("Đăng ký nghỉ phép"):
         hdv_cho_nghi = st.selectbox("Chọn hướng dẫn viên", [x["ten"] for x in st.session_state.hdv_list])
         ngay_nghi = st.date_input("Chọn ngày nghỉ")
@@ -147,7 +147,7 @@ with tab3:
             for i in range(tour["so_luong_hdv_can"]):
                 if hdv_phu_hop:
                     hdv_chon = hdv_phu_hop.pop(0)
-                    # Kiểm tra xung đột (TÍNH NĂNG 1)
+                    # Kiểm tra xung đột 
                     if kiem_tra_xung_dot(hdv_chon["ten"], ngay_tour):
                         xung_dot.append(f"HDV {hdv_chon['ten']} trùng lịch tour {tour['ten_tour']} ngày {ngay_tour.strftime('%d/%m/%Y')}")
                     else:
@@ -201,7 +201,7 @@ with tab3:
             st.success("Đã lưu phân công thủ công")
 
 with tab4:
-    st.subheader("Thống kê cân bằng công việc (TÍNH NĂNG 3)")
+    st.subheader("Thống kê cân bằng công việc")
     thong_ke = tinh_thong_ke_can_bang()
     if thong_ke.empty:
         st.info("Chưa có dữ liệu phân ca để thống kê")
@@ -213,7 +213,7 @@ with tab4:
         st.plotly_chart(fig, use_container_width=True)
 
 with tab5:
-    st.subheader("Lịch nhắc nhở tour sắp tới (TÍNH NĂNG 4)")
+    st.subheader("Lịch nhắc nhở tour sắp tới")
     hdv_nhac = st.selectbox("Chọn hướng dẫn viên để xem lịch nhắc nhở", [x["ten"] for x in st.session_state.hdv_list])
     lich = lay_lich_nhac_nho(hdv_nhac)
     if not lich:
