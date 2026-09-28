@@ -14,9 +14,9 @@ st.set_page_config(
 # Khởi tạo dữ liệu lưu trữ trong session state
 if "hdv_list" not in st.session_state:
     st.session_state.hdv_list = [
-        {"id": 1, "ten": "Nguyễn Văn A", "chuyen_mon": "Trong nước", "so_ngay_nghi": 4, "ngay_nghi": []},
-        {"id": 2, "ten": "Trần Thị B", "chuyen_mon": "Quốc tế", "so_ngay_nghi": 4, "ngay_nghi": []},
-        {"id": 3, "ten": "Lê Văn C", "chuyen_mon": "Trekking", "so_ngay_nghi": 4, "ngay_nghi": []},
+        {"id": 1, "ten": "Nguyễn Văn An", "chuyen_mon": "Trong nước", "so_ngay_nghi": 4, "ngay_nghi": []},
+        {"id": 2, "ten": "Trần Thị Bình", "chuyen_mon": "Quốc tế", "so_ngay_nghi": 4, "ngay_nghi": []},
+        {"id": 3, "ten": "Lê Văn Cường", "chuyen_mon": "Trekking", "so_ngay_nghi": 4, "ngay_nghi": []},
     ]
 
 if "lich_trinh_list" not in st.session_state:
