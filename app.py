@@ -108,4 +108,109 @@ with tab1:
     st.dataframe(df_hdv[["ten", "chuyen_mon", "so_ngay_nghi", "ngay_nghi"]], use_container_width=True, hide_index=True)
 
 with tab2:
-    st.s
+    st.subheader("Danh sách lịch tour")
+    if not st.session_state.lich_trinh_list:
+        st.info("Chưa có lịch tour nào")
+    else:
+        df_tour = pd.DataFrame(st.session_state.lich_trinh_list)
+        df_tour["ngay_khoi_hanh"] = df_tour["ngay_khoi_hanh"].apply(lambda x: x.strftime("%d/%m/%Y"))
+        st.dataframe(df_tour[["ten_tour", "ngay_khoi_hanh", "loai_tour", "so_luong_hdv_can"]], use_container_width=True, hide_index=True)
+
+with tab3:
+    st.subheader("Xếp ca tự động & thủ công")
+    tuan_chon = st.selectbox("Chọn tuần", [f"Tuần {i}" for i in range(1,6)])
+    ngay_trong_tuan = lay_danh_sach_ngay(int(tuan_chon.split()[-1]))
+
+    if st.button("Bắt đầu xếp ca", type="primary"):
+        ds_phân_ca_moi = []
+        xung_dot = []
+        for tour in st.session_state.lich_trinh_list:
+            ngay_tour = tour["ngay_khoi_hanh"]
+            if ngay_tour not in ngay_trong_tuan:
+                continue
+
+            hdv_phu_hop = [
+                hdv for hdv in st.session_state.hdv_list
+                if hdv["chuyen_mon"] == tour["loai_tour"] and ngay_tour.strftime("%d/%m/%Y") not in hdv["ngay_nghi"]
+            ]
+
+            for i in range(tour["so_luong_hdv_can"]):
+                if hdv_phu_hop:
+                    hdv_chon = hdv_phu_hop.pop(0)
+                    if kiem_tra_xung_dot(hdv_chon["ten"], ngay_tour):
+                        xung_dot.append(f"HDV {hdv_chon['ten']} trùng lịch tour {tour['ten_tour']} ngày {ngay_tour.strftime('%d/%m/%Y')}")
+                    else:
+                        ds_phân_ca_moi.append({
+                            "Ngày": ngay_tour.strftime("%d/%m/%Y"),
+                            "Hướng dẫn viên": hdv_chon["ten"],
+                            "Chuyên môn": hdv_chon["chuyen_mon"],
+                            "Tour": tour["ten_tour"],
+                            "Loại tour": tour["loai_tour"]
+                        })
+
+        if ds_phân_ca_moi:
+            if st.session_state.phân_ca.empty:
+                st.session_state.phân_ca = pd.DataFrame(ds_phân_ca_moi)
+            else:
+                st.session_state.phân_ca = pd.concat([st.session_state.phân_ca, pd.DataFrame(ds_phân_ca_moi)], ignore_index=True)
+            st.success(f"Đã phân công {len(ds_phân_ca_moi)} lượt")
+            if xung_dot:
+                st.warning("⚠️ Có các xung đột lịch:")
+                for thong_bao in xung_dot:
+                    st.write(f"- {thong_bao}")
+
+    st.subheader("Phân ca thủ công")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        hdv_list = [x["ten"] for x in st.session_state.hdv_list]
+        hdv_chon = st.selectbox("Chọn HDV", hdv_list if hdv_list else ["Chưa có HDV"])
+    with col2:
+        ngay_chon = st.date_input("Chọn ngày")
+    with col3:
+        tour_list = [x["ten_tour"] for x in st.session_state.lich_trinh_list]
+        tour_chon = st.selectbox("Chọn tour", tour_list if tour_list else ["Chưa có tour"])
+
+    if st.button("Lưu phân công thủ công", type="secondary"):
+        if kiem_tra_xung_dot(hdv_chon, ngay_chon):
+            st.error("⚠️ HDV này đã được phân công ca khác vào ngày này!")
+        else:
+            hdv_info = next(x for x in st.session_state.hdv_list if x["ten"] == hdv_chon)
+            tour_info = next(x for x in st.session_state.lich_trinh_list if x["ten_tour"] == tour_chon)
+            new_row = pd.DataFrame([{
+                "Ngày": ngay_chon.strftime("%d/%m/%Y"),
+                "Hướng dẫn viên": hdv_chon,
+                "Chuyên môn": hdv_info["chuyen_mon"],
+                "Tour": tour_chon,
+                "Loại tour": tour_info["loai_tour"]
+            }])
+            st.session_state.phân_ca = pd.concat([st.session_state.phân_ca, new_row], ignore_index=True)
+            st.success("Đã lưu phân công thủ công")
+
+with tab4:
+    st.subheader("Thống kê cân bằng công việc")
+    thong_ke = tinh_thong_ke_can_bang()
+    if thong_ke.empty:
+        st.info("Chưa có dữ liệu phân ca để thống kê")
+    else:
+        st.dataframe(thong_ke, use_container_width=True, hide_index=True)
+        fig = px.bar(thong_ke, x="Hướng dẫn viên", y="Số tour đã làm", color="Chênh lệch so với trung bình",
+                    title="Số tour của mỗi HDV so với trung bình", text="Số tour đã làm")
+        st.plotly_chart(fig, use_container_width=True)
+
+with tab5:
+    st.subheader("Lịch nhắc nhở tour sắp tới")
+    hdv_nhac = st.selectbox("Chọn hướng dẫn viên để xem lịch nhắc nhở", [x["ten"] for x in st.session_state.hdv_list])
+    lich = lay_lich_nhac_nho(hdv_nhac)
+    if not lich:
+        st.info(f"Không có tour nào sắp tới trong 7 ngày tới cho {hdv_nhac}")
+    else:
+        st.success(f"Lịch tour sắp tới của {hdv_nhac}:")
+        for ngay, tour in lich:
+            st.write(f"- Ngày {ngay}: Tour {tour}")
+
+    if not st.session_state.phân_ca.empty:
+        @st.cache_data
+        def convert_df(df):
+            return df.to_csv(index=False).encode('utf-8')
+        csv = convert_df(st.session_state.phân_ca)
+        st.download_button(label="📥 Tải lịch phân ca CSV", data=csv, file_name="lich_phan_ca.csv", mime='text/csv')
