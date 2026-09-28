@@ -1,105 +1,81 @@
 import streamlit as st
 import pymysql
 from pymysql.cursors import DictCursor
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timedelta
 from contextlib import contextmanager
 
-
 # ============================================================
-# CẤU HÌNH STREAMLIT
+# CẤU HÌNH TRANG
 # ============================================================
 
 st.set_page_config(
-    page_title="Tour Guide Shift Manager",
+    page_title="Quản lý ca Hướng dẫn viên",
     page_icon="🧭",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-
 # ============================================================
-# CSS
+# CSS GIAO DIỆN
 # ============================================================
 
-st.markdown(
-    """
-    <style>
-
-    .main {
-        background-color: #f5f7fb;
+st.markdown("""
+<style>
+    .main-title {
+        font-size: 32px;
+        font-weight: 700;
+        margin-bottom: 5px;
     }
 
-    .app-header {
-        background: linear-gradient(
-            135deg,
-            #0066cc,
-            #00a6a6
-        );
-        padding: 28px 32px;
-        border-radius: 18px;
-        color: white;
+    .sub-title {
+        color: #666;
         margin-bottom: 25px;
     }
 
-    .app-header h1 {
-        margin: 0;
-        font-size: 36px;
-        font-weight: 800;
-    }
-
-    .app-header p {
-        margin-top: 8px;
-        font-size: 17px;
-    }
-
-    .section-card {
-        background: white;
-        padding: 22px;
-        border-radius: 16px;
+    .metric-card {
+        padding: 15px;
+        border-radius: 10px;
+        background-color: #f5f7fa;
         border: 1px solid #e5e7eb;
-        margin-bottom: 20px;
     }
 
-    .shift-card {
-        background: white;
-        border-radius: 15px;
-        padding: 18px;
-        border: 1px solid #e5e7eb;
-        margin-bottom: 12px;
+    .status-daxep {
+        color: #2563eb;
+        font-weight: bold;
     }
 
-    .available {
-        color: #15803d;
-        font-weight: 700;
+    .status-dangthuchien {
+        color: #d97706;
+        font-weight: bold;
     }
 
-    .busy {
+    .status-hoanthanh {
+        color: #16a34a;
+        font-weight: bold;
+    }
+
+    .status-dahuy {
         color: #dc2626;
-        font-weight: 700;
+        font-weight: bold;
     }
 
-    .footer {
-        text-align: center;
-        color: #777;
-        padding: 30px;
+    div[data-testid="stMetricValue"] {
+        font-size: 28px;
     }
-
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+</style>
+""", unsafe_allow_html=True)
 
 
 # ============================================================
-# KẾT NỐI MYSQL AIVEN
+# KẾT NỐI AIVEN MYSQL
 # ============================================================
 
 def get_db_config():
-
     """
-    Ưu tiên lấy thông tin database từ Streamlit Secrets.
+    Đọc thông tin MySQL từ:
+    .streamlit/secrets.toml
 
-    Cấu hình secrets dự kiến:
+    Ví dụ:
 
     [mysql]
     host = "..."
@@ -108,96 +84,62 @@ def get_db_config():
     password = "..."
     database = "defaultdb"
     ssl = true
-
-    Có thể thêm:
-    ssl_ca = "..."
     """
 
-    if "mysql" not in st.secrets:
+    try:
+        config = {
+            "host": st.secrets["mysql"]["host"],
+            "port": int(st.secrets["mysql"]["port"]),
+            "user": st.secrets["mysql"]["user"],
+            "password": st.secrets["mysql"]["password"],
+            "database": st.secrets["mysql"]["database"],
+        }
+
+        ssl_enabled = st.secrets["mysql"].get("ssl", True)
+
+        if ssl_enabled:
+            config["ssl"] = {}
+
+        return config
+
+    except Exception as e:
         st.error(
-            "❌ Chưa tìm thấy cấu hình [mysql] trong Streamlit Secrets."
+            "Không đọc được thông tin kết nối MySQL. "
+            "Hãy kiểm tra file .streamlit/secrets.toml."
         )
-
-        st.info(
-            """
-            Hãy tạo file `.streamlit/secrets.toml` với cấu trúc:
-
-            [mysql]
-            host = "YOUR_AIVEN_HOST"
-            port = 12345
-            user = "YOUR_AIVEN_USER"
-            password = "YOUR_AIVEN_PASSWORD"
-            database = "defaultdb"
-            ssl = true
-            """
-        )
-
+        st.code(str(e))
         st.stop()
-
-    mysql_config = st.secrets["mysql"]
-
-    return {
-        "host": mysql_config["host"],
-        "port": int(mysql_config.get("port", 3306)),
-        "user": mysql_config["user"],
-        "password": mysql_config["password"],
-        "database": mysql_config["database"],
-        "ssl": mysql_config.get("ssl", True),
-        "ssl_ca": mysql_config.get("ssl_ca", None)
-    }
 
 
 @contextmanager
 def get_connection():
-
     config = get_db_config()
 
     connection = None
 
     try:
-
-        connection_kwargs = {
-            "host": config["host"],
-            "port": config["port"],
-            "user": config["user"],
-            "password": config["password"],
-            "database": config["database"],
-            "cursorclass": DictCursor,
-            "autocommit": False,
-            "connect_timeout": 10
-        }
-
-        # ----------------------------------------------------
-        # SSL AIVEN
-        # ----------------------------------------------------
-
-        if config["ssl"]:
-
-            if config["ssl_ca"]:
-
-                connection_kwargs["ssl"] = {
-                    "ca": config["ssl_ca"]
-                }
-
-            else:
-
-                connection_kwargs["ssl"] = {}
-
-        connection = pymysql.connect(**connection_kwargs)
+        connection = pymysql.connect(
+            host=config["host"],
+            port=config["port"],
+            user=config["user"],
+            password=config["password"],
+            database=config["database"],
+            cursorclass=DictCursor,
+            autocommit=False,
+            connect_timeout=15,
+            read_timeout=30,
+            write_timeout=30,
+            ssl=config.get("ssl")
+        )
 
         yield connection
 
-        connection.commit()
-
     except Exception:
-
         if connection:
             connection.rollback()
-
         raise
 
     finally:
-
         if connection:
             connection.close()
 
@@ -206,446 +148,280 @@ def get_connection():
 # KHỞI TẠO DATABASE
 # ============================================================
 
-def initialize_database():
+def init_database():
+
+    create_guides = """
+    CREATE TABLE IF NOT EXISTS tour_guides (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        full_name VARCHAR(150) NOT NULL,
+        phone VARCHAR(30),
+        email VARCHAR(150),
+        language VARCHAR(100),
+        guide_type VARCHAR(100),
+        experience_years INT DEFAULT 0,
+        status VARCHAR(50) DEFAULT 'Đang hoạt động',
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """
+
+    create_shifts = """
+    CREATE TABLE IF NOT EXISTS guide_shifts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        guide_id INT NOT NULL,
+        shift_date DATE NOT NULL,
+        start_time TIME NOT NULL,
+        end_time TIME NOT NULL,
+        tour_name VARCHAR(255) NOT NULL,
+        destination VARCHAR(255),
+        tour_type VARCHAR(100),
+        guest_count INT DEFAULT 0,
+        pickup_location VARCHAR(255),
+        status VARCHAR(50) DEFAULT 'Đã xếp',
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ON UPDATE CURRENT_TIMESTAMP,
+
+        CONSTRAINT fk_shift_guide
+        FOREIGN KEY (guide_id)
+        REFERENCES tour_guides(id)
+        ON DELETE CASCADE,
+
+        INDEX idx_shift_date (shift_date),
+        INDEX idx_guide_date (guide_id, shift_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """
+
+    create_days_off = """
+    CREATE TABLE IF NOT EXISTS guide_days_off (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        guide_id INT NOT NULL,
+        off_date DATE NOT NULL,
+        reason VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+        CONSTRAINT fk_dayoff_guide
+        FOREIGN KEY (guide_id)
+        REFERENCES tour_guides(id)
+        ON DELETE CASCADE,
+
+        UNIQUE KEY unique_guide_dayoff (guide_id, off_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """
 
     with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(create_guides)
+            cursor.execute(create_shifts)
+            cursor.execute(create_days_off)
 
-        cursor = conn.cursor()
-
-        # ----------------------------------------------------
-        # BẢNG HƯỚNG DẪN VIÊN
-        # ----------------------------------------------------
-
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tour_guides (
-
-                id INT AUTO_INCREMENT PRIMARY KEY,
-
-                guide_code VARCHAR(30) UNIQUE NOT NULL,
-
-                full_name VARCHAR(150) NOT NULL,
-
-                phone VARCHAR(30),
-
-                email VARCHAR(150),
-
-                languages VARCHAR(255),
-
-                specialty VARCHAR(255),
-
-                status ENUM(
-                    'Đang làm việc',
-                    'Nghỉ việc'
-                ) DEFAULT 'Đang làm việc',
-
-                created_at TIMESTAMP
-                DEFAULT CURRENT_TIMESTAMP
-
-            ) ENGINE=InnoDB
-            """
-        )
-
-        # ----------------------------------------------------
-        # BẢNG CA LÀM VIỆC
-        # ----------------------------------------------------
-
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS guide_shifts (
-
-                id INT AUTO_INCREMENT PRIMARY KEY,
-
-                guide_id INT NOT NULL,
-
-                shift_date DATE NOT NULL,
-
-                start_time TIME NOT NULL,
-
-                end_time TIME NOT NULL,
-
-                tour_name VARCHAR(255) NOT NULL,
-
-                destination VARCHAR(255),
-
-                tour_type VARCHAR(100),
-
-                guest_count INT DEFAULT 0,
-
-                pickup_location VARCHAR(255),
-
-                note TEXT,
-
-                status ENUM(
-                    'Đã xếp',
-                    'Đang thực hiện',
-                    'Hoàn thành',
-                    'Đã hủy'
-                ) DEFAULT 'Đã xếp',
-
-                created_at TIMESTAMP
-                DEFAULT CURRENT_TIMESTAMP,
-
-                FOREIGN KEY (guide_id)
-                REFERENCES tour_guides(id)
-                ON DELETE CASCADE,
-
-                INDEX idx_shift_date (shift_date),
-
-                INDEX idx_guide_date (
-                    guide_id,
-                    shift_date
-                )
-
-            ) ENGINE=InnoDB
-            """
-        )
-
-        # ----------------------------------------------------
-        # BẢNG NGÀY NGHỈ
-        # ----------------------------------------------------
-
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS guide_days_off (
-
-                id INT AUTO_INCREMENT PRIMARY KEY,
-
-                guide_id INT NOT NULL,
-
-                off_date DATE NOT NULL,
-
-                reason VARCHAR(255),
-
-                created_at TIMESTAMP
-                DEFAULT CURRENT_TIMESTAMP,
-
-                FOREIGN KEY (guide_id)
-                REFERENCES tour_guides(id)
-                ON DELETE CASCADE,
-
-                UNIQUE KEY unique_guide_day_off (
-                    guide_id,
-                    off_date
-                )
-
-            ) ENGINE=InnoDB
-            """
-        )
+        conn.commit()
 
 
 # ============================================================
-# KIỂM TRA DATABASE
-# ============================================================
-
-def check_database_connection():
-
-    try:
-
-        initialize_database()
-
-        with get_connection() as conn:
-
-            cursor = conn.cursor()
-
-            cursor.execute(
-                "SELECT 1 AS connected"
-            )
-
-            result = cursor.fetchone()
-
-            return result is not None
-
-    except Exception as e:
-
-        st.error(
-            "❌ Không thể kết nối MySQL Aiven."
-        )
-
-        st.code(str(e))
-
-        st.info(
-            """
-            Kiểm tra lại:
-
-            1. Host
-            2. Port
-            3. Username
-            4. Password
-            5. Database
-            6. SSL
-            7. Aiven service còn đang hoạt động
-            """
-        )
-
-        return False
-
-
-# ============================================================
-# CRUD - HƯỚNG DẪN VIÊN
+# HÀM DATABASE - HƯỚNG DẪN VIÊN
 # ============================================================
 
 def get_guides(include_inactive=False):
 
     with get_connection() as conn:
+        with conn.cursor() as cursor:
 
-        cursor = conn.cursor()
+            if include_inactive:
+                cursor.execute("""
+                    SELECT *
+                    FROM tour_guides
+                    ORDER BY full_name
+                """)
+            else:
+                cursor.execute("""
+                    SELECT *
+                    FROM tour_guides
+                    WHERE status = 'Đang hoạt động'
+                    ORDER BY full_name
+                """)
 
-        if include_inactive:
-
-            cursor.execute(
-                """
-                SELECT *
-                FROM tour_guides
-                ORDER BY full_name
-                """
-            )
-
-        else:
-
-            cursor.execute(
-                """
-                SELECT *
-                FROM tour_guides
-                WHERE status = 'Đang làm việc'
-                ORDER BY full_name
-                """
-            )
-
-        return cursor.fetchall()
+            return cursor.fetchall()
 
 
 def get_guide(guide_id):
 
     with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT *
+                FROM tour_guides
+                WHERE id = %s
+            """, (guide_id,))
 
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT *
-            FROM tour_guides
-            WHERE id = %s
-            """,
-            (guide_id,)
-        )
-
-        return cursor.fetchone()
+            return cursor.fetchone()
 
 
 def add_guide(
-    guide_code,
     full_name,
     phone,
     email,
-    languages,
-    specialty
+    language,
+    guide_type,
+    experience_years,
+    status,
+    notes
 ):
 
     with get_connection() as conn:
+        with conn.cursor() as cursor:
 
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            INSERT INTO tour_guides
-            (
-                guide_code,
+            cursor.execute("""
+                INSERT INTO tour_guides
+                (
+                    full_name,
+                    phone,
+                    email,
+                    language,
+                    guide_type,
+                    experience_years,
+                    status,
+                    notes
+                )
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (
                 full_name,
                 phone,
                 email,
-                languages,
-                specialty
-            )
-            VALUES
-            (
-                %s, %s, %s, %s, %s, %s
-            )
-            """,
-            (
-                guide_code,
-                full_name,
-                phone,
-                email,
-                languages,
-                specialty
-            )
-        )
+                language,
+                guide_type,
+                experience_years,
+                status,
+                notes
+            ))
+
+        conn.commit()
 
 
 def update_guide(
     guide_id,
-    guide_code,
     full_name,
     phone,
     email,
-    languages,
-    specialty,
-    status
+    language,
+    guide_type,
+    experience_years,
+    status,
+    notes
 ):
 
     with get_connection() as conn:
+        with conn.cursor() as cursor:
 
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            UPDATE tour_guides
-
-            SET
-                guide_code = %s,
-                full_name = %s,
-                phone = %s,
-                email = %s,
-                languages = %s,
-                specialty = %s,
-                status = %s
-
-            WHERE id = %s
-            """,
-            (
-                guide_code,
+            cursor.execute("""
+                UPDATE tour_guides
+                SET
+                    full_name = %s,
+                    phone = %s,
+                    email = %s,
+                    language = %s,
+                    guide_type = %s,
+                    experience_years = %s,
+                    status = %s,
+                    notes = %s
+                WHERE id = %s
+            """, (
                 full_name,
                 phone,
                 email,
-                languages,
-                specialty,
+                language,
+                guide_type,
+                experience_years,
                 status,
+                notes,
                 guide_id
-            )
-        )
+            ))
+
+        conn.commit()
 
 
 def delete_guide(guide_id):
 
     with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                DELETE FROM tour_guides
+                WHERE id = %s
+            """, (guide_id,))
 
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            DELETE FROM tour_guides
-            WHERE id = %s
-            """,
-            (guide_id,)
-        )
+        conn.commit()
 
 
 # ============================================================
-# CRUD - NGÀY NGHỈ
+# HÀM DATABASE - CA LÀM VIỆC
 # ============================================================
 
-def add_day_off(
-    guide_id,
-    off_date,
-    reason
+def get_shifts(
+    from_date=None,
+    to_date=None,
+    guide_id=None,
+    status=None
 ):
 
-    with get_connection() as conn:
+    sql = """
+        SELECT
+            s.*,
+            g.full_name,
+            g.phone
+        FROM guide_shifts s
+        INNER JOIN tour_guides g
+            ON s.guide_id = g.id
+        WHERE 1=1
+    """
 
-        cursor = conn.cursor()
+    params = []
 
-        cursor.execute(
-            """
-            INSERT INTO guide_days_off
-            (
-                guide_id,
-                off_date,
-                reason
-            )
-            VALUES
-            (
-                %s, %s, %s
-            )
-            """,
-            (
-                guide_id,
-                off_date,
-                reason
-            )
-        )
+    if from_date:
+        sql += " AND s.shift_date >= %s"
+        params.append(from_date)
 
+    if to_date:
+        sql += " AND s.shift_date <= %s"
+        params.append(to_date)
 
-def get_day_offs():
+    if guide_id:
+        sql += " AND s.guide_id = %s"
+        params.append(guide_id)
 
-    with get_connection() as conn:
+    if status:
+        sql += " AND s.status = %s"
+        params.append(status)
 
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT
-                d.id,
-                d.guide_id,
-                g.guide_code,
-                g.full_name,
-                d.off_date,
-                d.reason
-
-            FROM guide_days_off d
-
-            JOIN tour_guides g
-            ON d.guide_id = g.id
-
-            ORDER BY
-                d.off_date DESC
-            """
-        )
-
-        return cursor.fetchall()
-
-
-def delete_day_off(off_id):
+    sql += """
+        ORDER BY
+            s.shift_date ASC,
+            s.start_time ASC,
+            g.full_name ASC
+    """
 
     with get_connection() as conn:
-
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            DELETE FROM guide_days_off
-            WHERE id = %s
-            """,
-            (off_id,)
-        )
+        with conn.cursor() as cursor:
+            cursor.execute(sql, params)
+            return cursor.fetchall()
 
 
-# ============================================================
-# KIỂM TRA NGÀY NGHỈ
-# ============================================================
-
-def is_guide_off(
-    guide_id,
-    shift_date
-):
+def get_shift(shift_id):
 
     with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT
+                    s.*,
+                    g.full_name
+                FROM guide_shifts s
+                INNER JOIN tour_guides g
+                    ON s.guide_id = g.id
+                WHERE s.id = %s
+            """, (shift_id,))
 
-        cursor = conn.cursor()
+            return cursor.fetchone()
 
-        cursor.execute(
-            """
-            SELECT id
-            FROM guide_days_off
-
-            WHERE
-                guide_id = %s
-                AND off_date = %s
-
-            LIMIT 1
-            """,
-            (
-                guide_id,
-                shift_date
-            )
-        )
-
-        return cursor.fetchone() is not None
-
-
-# ============================================================
-# KIỂM TRA TRÙNG CA
-# ============================================================
 
 def check_shift_conflict(
     guide_id,
@@ -655,61 +431,50 @@ def check_shift_conflict(
     exclude_shift_id=None
 ):
 
+    sql = """
+        SELECT
+            s.id,
+            s.start_time,
+            s.end_time,
+            s.tour_name
+        FROM guide_shifts s
+        WHERE s.guide_id = %s
+          AND s.shift_date = %s
+          AND s.status <> 'Đã hủy'
+          AND s.start_time < %s
+          AND s.end_time > %s
+    """
+
+    params = [
+        guide_id,
+        shift_date,
+        end_time,
+        start_time
+    ]
+
+    if exclude_shift_id:
+        sql += " AND s.id <> %s"
+        params.append(exclude_shift_id)
+
     with get_connection() as conn:
-
-        cursor = conn.cursor()
-
-        query = """
-            SELECT
-                s.id,
-                s.start_time,
-                s.end_time,
-                s.tour_name,
-                s.destination
-
-            FROM guide_shifts s
-
-            WHERE
-                s.guide_id = %s
-                AND s.shift_date = %s
-                AND s.status != 'Đã hủy'
-
-                AND (
-                    s.start_time < %s
-                    AND s.end_time > %s
-                )
-        """
-
-        params = [
-            guide_id,
-            shift_date,
-            end_time,
-            start_time
-        ]
-
-        if exclude_shift_id:
-
-            query += """
-                AND s.id != %s
-            """
-
-            params.append(exclude_shift_id)
-
-        query += """
-            LIMIT 1
-        """
-
-        cursor.execute(
-            query,
-            tuple(params)
-        )
-
-        return cursor.fetchone()
+        with conn.cursor() as cursor:
+            cursor.execute(sql, params)
+            return cursor.fetchone()
 
 
-# ============================================================
-# THÊM CA
-# ============================================================
+def is_day_off(guide_id, off_date):
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id
+                FROM guide_days_off
+                WHERE guide_id = %s
+                  AND off_date = %s
+            """, (guide_id, off_date))
+
+            return cursor.fetchone() is not None
+
 
 def add_shift(
     guide_id,
@@ -721,17 +486,31 @@ def add_shift(
     tour_type,
     guest_count,
     pickup_location,
-    note
+    status,
+    notes
 ):
 
     with get_connection() as conn:
+        with conn.cursor() as cursor:
 
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            INSERT INTO guide_shifts
-            (
+            cursor.execute("""
+                INSERT INTO guide_shifts
+                (
+                    guide_id,
+                    shift_date,
+                    start_time,
+                    end_time,
+                    tour_name,
+                    destination,
+                    tour_type,
+                    guest_count,
+                    pickup_location,
+                    status,
+                    notes
+                )
+                VALUES
+                (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (
                 guide_id,
                 shift_date,
                 start_time,
@@ -741,17 +520,47 @@ def add_shift(
                 tour_type,
                 guest_count,
                 pickup_location,
-                note
-            )
+                status,
+                notes
+            ))
 
-            VALUES
-            (
-                %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s
-            )
-            """,
-            (
+        conn.commit()
+
+
+def update_shift(
+    shift_id,
+    guide_id,
+    shift_date,
+    start_time,
+    end_time,
+    tour_name,
+    destination,
+    tour_type,
+    guest_count,
+    pickup_location,
+    status,
+    notes
+):
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+
+            cursor.execute("""
+                UPDATE guide_shifts
+                SET
+                    guide_id = %s,
+                    shift_date = %s,
+                    start_time = %s,
+                    end_time = %s,
+                    tour_name = %s,
+                    destination = %s,
+                    tour_type = %s,
+                    guest_count = %s,
+                    pickup_location = %s,
+                    status = %s,
+                    notes = %s
+                WHERE id = %s
+            """, (
                 guide_id,
                 shift_date,
                 start_time,
@@ -761,217 +570,94 @@ def add_shift(
                 tour_type,
                 guest_count,
                 pickup_location,
-                note
-            )
-        )
+                status,
+                notes,
+                shift_id
+            ))
 
+        conn.commit()
 
-# ============================================================
-# LẤY DANH SÁCH CA
-# ============================================================
-
-def get_shifts(
-    selected_date=None,
-    guide_id=None
-):
-
-    with get_connection() as conn:
-
-        cursor = conn.cursor()
-
-        query = """
-            SELECT
-
-                s.id,
-                s.guide_id,
-
-                g.guide_code,
-                g.full_name,
-                g.phone,
-
-                s.shift_date,
-                s.start_time,
-                s.end_time,
-
-                s.tour_name,
-                s.destination,
-                s.tour_type,
-
-                s.guest_count,
-                s.pickup_location,
-                s.note,
-                s.status
-
-            FROM guide_shifts s
-
-            JOIN tour_guides g
-            ON s.guide_id = g.id
-
-            WHERE 1 = 1
-        """
-
-        params = []
-
-        if selected_date:
-
-            query += """
-                AND s.shift_date = %s
-            """
-
-            params.append(selected_date)
-
-        if guide_id:
-
-            query += """
-                AND s.guide_id = %s
-            """
-
-            params.append(guide_id)
-
-        query += """
-            ORDER BY
-                s.shift_date ASC,
-                s.start_time ASC,
-                g.full_name ASC
-        """
-
-        cursor.execute(
-            query,
-            tuple(params)
-        )
-
-        return cursor.fetchall()
-
-
-# ============================================================
-# XÓA CA
-# ============================================================
 
 def delete_shift(shift_id):
 
     with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                DELETE FROM guide_shifts
+                WHERE id = %s
+            """, (shift_id,))
 
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            DELETE FROM guide_shifts
-            WHERE id = %s
-            """,
-            (shift_id,)
-        )
+        conn.commit()
 
 
 # ============================================================
-# CẬP NHẬT TRẠNG THÁI CA
+# NGÀY NGHỈ
 # ============================================================
 
-def update_shift_status(
-    shift_id,
-    status
-):
+def get_days_off():
 
     with get_connection() as conn:
+        with conn.cursor() as cursor:
 
-        cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    d.*,
+                    g.full_name
+                FROM guide_days_off d
+                INNER JOIN tour_guides g
+                    ON d.guide_id = g.id
+                ORDER BY d.off_date DESC
+            """)
 
-        cursor.execute(
-            """
-            UPDATE guide_shifts
-
-            SET status = %s
-
-            WHERE id = %s
-            """,
-            (
-                status,
-                shift_id
-            )
-        )
+            return cursor.fetchall()
 
 
-# ============================================================
-# DASHBOARD
-# ============================================================
-
-def get_dashboard_stats():
+def add_day_off(guide_id, off_date, reason):
 
     with get_connection() as conn:
+        with conn.cursor() as cursor:
 
-        cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO guide_days_off
+                (
+                    guide_id,
+                    off_date,
+                    reason
+                )
+                VALUES (%s,%s,%s)
+            """, (
+                guide_id,
+                off_date,
+                reason
+            ))
 
-        cursor.execute(
-            """
-            SELECT
-                COUNT(*) AS total_guides,
+        conn.commit()
 
-                SUM(
-                    status = 'Đang làm việc'
-                ) AS active_guides
 
-            FROM tour_guides
-            """
-        )
+def delete_day_off(dayoff_id):
 
-        guide_stats = cursor.fetchone()
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
 
-        cursor.execute(
-            """
-            SELECT
+            cursor.execute("""
+                DELETE FROM guide_days_off
+                WHERE id = %s
+            """, (dayoff_id,))
 
-                COUNT(*) AS total_shifts,
-
-                SUM(
-                    status = 'Đã xếp'
-                ) AS scheduled_shifts,
-
-                SUM(
-                    status = 'Đang thực hiện'
-                ) AS running_shifts,
-
-                SUM(
-                    status = 'Hoàn thành'
-                ) AS completed_shifts,
-
-                SUM(
-                    status = 'Đã hủy'
-                ) AS cancelled_shifts
-
-            FROM guide_shifts
-            """
-        )
-
-        shift_stats = cursor.fetchone()
-
-        return guide_stats, shift_stats
+        conn.commit()
 
 
 # ============================================================
-# HEADER
+# KHỞI TẠO DATABASE
 # ============================================================
 
-st.markdown(
-    """
-    <div class="app-header">
+try:
+    init_database()
 
-        <h1>🧭 TOUR GUIDE SHIFT MANAGER</h1>
-
-        <p>
-            Hệ thống quản lý và phân ca hướng dẫn viên du lịch
-            theo ngày
-        </p>
-
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-
-# ============================================================
-# KIỂM TRA KẾT NỐI
-# ============================================================
-
-if not check_database_connection():
+except Exception as e:
+    st.error("❌ Không thể kết nối đến Aiven MySQL.")
+    st.error("Hãy kiểm tra Host, Port, User, Password, Database và SSL.")
+    st.code(str(e))
     st.stop()
 
 
@@ -979,515 +665,529 @@ if not check_database_connection():
 # SIDEBAR
 # ============================================================
 
-with st.sidebar:
+st.sidebar.title("🧭 QUẢN LÝ HƯỚNG DẪN VIÊN")
 
-    st.image(
-        "https://cdn-icons-png.flaticon.com/512/3097/3097130.png",
-        width=75
-    )
+menu = st.sidebar.radio(
+    "Chức năng",
+    [
+        "📊 Tổng quan",
+        "👤 Quản lý hướng dẫn viên",
+        "📅 Xếp ca theo ngày",
+        "🗓️ Lịch làm việc",
+        "🏖️ Ngày nghỉ",
+        "⚙️ Quản lý ca"
+    ]
+)
 
-    st.title("Tour Guide Manager")
+st.sidebar.divider()
 
-    st.divider()
-
-    menu = st.radio(
-        "MENU",
-        [
-            "📊 Dashboard",
-            "👨‍💼 Quản lý HDV",
-            "📅 Phân ca",
-            "🗓️ Lịch phân ca",
-            "🏖️ Ngày nghỉ",
-            "📋 Tất cả ca"
-        ]
-    )
-
-    st.divider()
-
-    st.caption(
-        "Database: MySQL Aiven"
-    )
-
-    st.caption(
-        "Streamlit Application"
-    )
+st.sidebar.caption(
+    "Ứng dụng quản lý và phân ca hướng dẫn viên du lịch"
+)
 
 
 # ============================================================
-# DASHBOARD
+# TRANG TỔNG QUAN
 # ============================================================
 
-if menu == "📊 Dashboard":
+if menu == "📊 Tổng quan":
 
-    st.header("📊 Dashboard")
+    st.markdown(
+        '<div class="main-title">📊 Tổng quan hệ thống</div>',
+        unsafe_allow_html=True
+    )
 
-    guide_stats, shift_stats = get_dashboard_stats()
+    st.markdown(
+        '<div class="sub-title">Quản lý và phân ca hướng dẫn viên du lịch</div>',
+        unsafe_allow_html=True
+    )
+
+    guides = get_guides(include_inactive=True)
+    active_guides = [
+        g for g in guides
+        if g["status"] == "Đang hoạt động"
+    ]
+
+    today = date.today()
+
+    today_shifts = get_shifts(
+        from_date=today,
+        to_date=today
+    )
+
+    week_end = today + timedelta(days=6)
+
+    week_shifts = get_shifts(
+        from_date=today,
+        to_date=week_end
+    )
+
+    completed_today = [
+        s for s in today_shifts
+        if s["status"] == "Hoàn thành"
+    ]
+
+    cancelled_today = [
+        s for s in today_shifts
+        if s["status"] == "Đã hủy"
+    ]
 
     col1, col2, col3, col4 = st.columns(4)
 
-    with col1:
-
-        st.metric(
-            "👨‍💼 Tổng HDV",
-            guide_stats["total_guides"] or 0
-        )
-
-    with col2:
-
-        st.metric(
-            "🟢 HDV đang làm",
-            guide_stats["active_guides"] or 0
-        )
-
-    with col3:
-
-        st.metric(
-            "📅 Tổng số ca",
-            shift_stats["total_shifts"] or 0
-        )
-
-    with col4:
-
-        st.metric(
-            "⏳ Ca chờ thực hiện",
-            shift_stats["scheduled_shifts"] or 0
-        )
-
-    st.divider()
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-
-        st.metric(
-            "🔵 Đang thực hiện",
-            shift_stats["running_shifts"] or 0
-        )
-
-    with col2:
-
-        st.metric(
-            "✅ Hoàn thành",
-            shift_stats["completed_shifts"] or 0
-        )
-
-    with col3:
-
-        st.metric(
-            "❌ Đã hủy",
-            shift_stats["cancelled_shifts"] or 0
-        )
-
-    st.divider()
-
-    st.subheader("📅 Lịch hôm nay")
-
-    today_shifts = get_shifts(
-        selected_date=date.today()
+    col1.metric(
+        "👤 HDV hoạt động",
+        len(active_guides)
     )
+
+    col2.metric(
+        "📅 Ca hôm nay",
+        len(today_shifts)
+    )
+
+    col3.metric(
+        "📆 Ca 7 ngày tới",
+        len(week_shifts)
+    )
+
+    col4.metric(
+        "✅ Hoàn thành hôm nay",
+        len(completed_today)
+    )
+
+    st.divider()
+
+    st.subheader("📅 Lịch làm việc hôm nay")
 
     if not today_shifts:
 
-        st.info(
-            "Hôm nay chưa có ca nào được phân."
-        )
+        st.info("Hôm nay chưa có ca nào được xếp.")
 
     else:
 
-        for shift in today_shifts:
+        display_data = []
 
-            st.markdown(
-                f"""
-                <div class="shift-card">
+        for s in today_shifts:
 
-                <b>
-                {shift['start_time']} -
-                {shift['end_time']}
-                </b>
+            display_data.append({
+                "HDV": s["full_name"],
+                "Thời gian":
+                    f"{s['start_time']} - {s['end_time']}",
+                "Tour": s["tour_name"],
+                "Điểm đến": s["destination"],
+                "Khách": s["guest_count"],
+                "Trạng thái": s["status"]
+            })
 
-                &nbsp;&nbsp;
+        st.dataframe(
+            display_data,
+            use_container_width=True,
+            hide_index=True
+        )
 
-                🧑‍💼 {shift['full_name']}
+    st.divider()
 
-                <br><br>
+    st.subheader("📈 Thống kê trạng thái ca trong 7 ngày tới")
 
-                🗺️ {shift['tour_name']}
+    status_counts = {
+        "Đã xếp": 0,
+        "Đang thực hiện": 0,
+        "Hoàn thành": 0,
+        "Đã hủy": 0
+    }
 
-                &nbsp; | &nbsp;
+    for s in week_shifts:
 
-                📍 {shift['destination']}
+        if s["status"] in status_counts:
+            status_counts[s["status"]] += 1
 
-                &nbsp; | &nbsp;
+    chart_data = {
+        "Trạng thái": list(status_counts.keys()),
+        "Số ca": list(status_counts.values())
+    }
 
-                👥 {shift['guest_count']} khách
-
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-
-
-# ============================================================
-# QUẢN LÝ HDV
-# ============================================================
-
-elif menu == "👨‍💼 Quản lý HDV":
-
-    st.header("👨‍💼 Quản lý hướng dẫn viên")
-
-    tabs = st.tabs(
-        [
-            "➕ Thêm HDV",
-            "✏️ Chỉnh sửa",
-            "📋 Danh sách"
-        ]
+    st.bar_chart(
+        chart_data,
+        x="Trạng thái",
+        y="Số ca"
     )
+
+
+# ============================================================
+# QUẢN LÝ HƯỚNG DẪN VIÊN
+# ============================================================
+
+elif menu == "👤 Quản lý hướng dẫn viên":
+
+    st.markdown(
+        '<div class="main-title">👤 Quản lý hướng dẫn viên</div>',
+        unsafe_allow_html=True
+    )
+
+    tab1, tab2 = st.tabs([
+        "➕ Thêm hướng dẫn viên",
+        "📋 Danh sách hướng dẫn viên"
+    ])
 
     # --------------------------------------------------------
     # THÊM HDV
     # --------------------------------------------------------
 
-    with tabs[0]:
-
-        st.subheader(
-            "➕ Thêm hướng dẫn viên"
-        )
+    with tab1:
 
         with st.form("add_guide_form"):
+
+            st.subheader("Thông tin hướng dẫn viên")
 
             col1, col2 = st.columns(2)
 
             with col1:
 
-                guide_code = st.text_input(
-                    "Mã HDV *",
-                    placeholder="HDV001"
-                )
-
                 full_name = st.text_input(
-                    "Họ và tên *",
-                    placeholder="Nguyễn Văn A"
+                    "Họ và tên *"
                 )
 
                 phone = st.text_input(
-                    "Số điện thoại",
-                    placeholder="0901234567"
+                    "Số điện thoại"
                 )
-
-            with col2:
 
                 email = st.text_input(
                     "Email"
                 )
 
-                languages = st.text_input(
+                language = st.text_input(
                     "Ngoại ngữ",
-                    placeholder="Tiếng Anh, Tiếng Trung"
+                    placeholder="VD: Tiếng Anh, Tiếng Trung"
                 )
 
-                specialty = st.text_input(
-                    "Chuyên môn",
-                    placeholder="Nội địa, Quốc tế, Văn hóa..."
+            with col2:
+
+                guide_type = st.selectbox(
+                    "Loại hướng dẫn viên",
+                    [
+                        "HDV nội địa",
+                        "HDV quốc tế",
+                        "HDV theo đoàn",
+                        "HDV tự do"
+                    ]
+                )
+
+                experience_years = st.number_input(
+                    "Số năm kinh nghiệm",
+                    min_value=0,
+                    max_value=50,
+                    value=0
+                )
+
+                status = st.selectbox(
+                    "Trạng thái",
+                    [
+                        "Đang hoạt động",
+                        "Tạm nghỉ",
+                        "Nghỉ việc"
+                    ]
+                )
+
+                notes = st.text_area(
+                    "Ghi chú"
                 )
 
             submitted = st.form_submit_button(
-                "💾 Lưu hướng dẫn viên",
-                type="primary"
+                "➕ Thêm hướng dẫn viên",
+                use_container_width=True
             )
 
             if submitted:
 
-                if not guide_code.strip():
+                if not full_name.strip():
 
-                    st.error(
-                        "Vui lòng nhập mã HDV."
-                    )
-
-                elif not full_name.strip():
-
-                    st.error(
-                        "Vui lòng nhập họ tên HDV."
-                    )
+                    st.error("Vui lòng nhập họ tên.")
 
                 else:
 
                     try:
 
                         add_guide(
-                            guide_code.strip(),
                             full_name.strip(),
                             phone.strip(),
                             email.strip(),
-                            languages.strip(),
-                            specialty.strip()
+                            language.strip(),
+                            guide_type,
+                            experience_years,
+                            status,
+                            notes.strip()
                         )
 
                         st.success(
-                            "✅ Đã thêm hướng dẫn viên."
+                            f"Đã thêm hướng dẫn viên: {full_name}"
                         )
 
                         st.rerun()
 
-                    except pymysql.err.IntegrityError:
-
-                        st.error(
-                            "❌ Mã HDV đã tồn tại."
-                        )
-
                     except Exception as e:
 
                         st.error(
-                            f"Lỗi: {e}"
+                            f"Không thể thêm hướng dẫn viên: {e}"
                         )
 
     # --------------------------------------------------------
-    # CHỈNH SỬA
+    # DANH SÁCH HDV
     # --------------------------------------------------------
 
-    with tabs[1]:
+    with tab2:
 
-        guides = get_guides(
-            include_inactive=True
-        )
+        guides = get_guides(include_inactive=True)
 
         if not guides:
 
-            st.info(
-                "Chưa có hướng dẫn viên."
-            )
+            st.info("Chưa có hướng dẫn viên.")
 
         else:
 
-            guide_options = {
-                f"{g['guide_code']} - {g['full_name']}":
-                g["id"]
-                for g in guides
-            }
+            display_data = []
 
-            selected_label = st.selectbox(
-                "Chọn HDV",
-                list(guide_options.keys())
+            for g in guides:
+
+                display_data.append({
+                    "ID": g["id"],
+                    "Họ tên": g["full_name"],
+                    "Điện thoại": g["phone"],
+                    "Email": g["email"],
+                    "Ngoại ngữ": g["language"],
+                    "Loại HDV": g["guide_type"],
+                    "Kinh nghiệm": f"{g['experience_years']} năm",
+                    "Trạng thái": g["status"]
+                })
+
+            st.dataframe(
+                display_data,
+                use_container_width=True,
+                hide_index=True
             )
-
-            selected_guide = get_guide(
-                guide_options[selected_label]
-            )
-
-            with st.form("edit_guide_form"):
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-
-                    edit_code = st.text_input(
-                        "Mã HDV",
-                        value=selected_guide["guide_code"]
-                    )
-
-                    edit_name = st.text_input(
-                        "Họ và tên",
-                        value=selected_guide["full_name"]
-                    )
-
-                    edit_phone = st.text_input(
-                        "Số điện thoại",
-                        value=selected_guide["phone"] or ""
-                    )
-
-                with col2:
-
-                    edit_email = st.text_input(
-                        "Email",
-                        value=selected_guide["email"] or ""
-                    )
-
-                    edit_languages = st.text_input(
-                        "Ngoại ngữ",
-                        value=selected_guide["languages"] or ""
-                    )
-
-                    edit_specialty = st.text_input(
-                        "Chuyên môn",
-                        value=selected_guide["specialty"] or ""
-                    )
-
-                    edit_status = st.selectbox(
-                        "Trạng thái",
-                        [
-                            "Đang làm việc",
-                            "Nghỉ việc"
-                        ],
-                        index=(
-                            0
-                            if selected_guide["status"]
-                            == "Đang làm việc"
-                            else 1
-                        )
-                    )
-
-                save_edit = st.form_submit_button(
-                    "💾 Cập nhật",
-                    type="primary"
-                )
-
-                if save_edit:
-
-                    try:
-
-                        update_guide(
-                            selected_guide["id"],
-                            edit_code.strip(),
-                            edit_name.strip(),
-                            edit_phone.strip(),
-                            edit_email.strip(),
-                            edit_languages.strip(),
-                            edit_specialty.strip(),
-                            edit_status
-                        )
-
-                        st.success(
-                            "Đã cập nhật HDV."
-                        )
-
-                        st.rerun()
-
-                    except Exception as e:
-
-                        st.error(
-                            f"Lỗi: {e}"
-                        )
 
             st.divider()
 
-            if st.button(
-                "🗑️ Xóa HDV này",
-                type="secondary"
-            ):
+            st.subheader("✏️ Chỉnh sửa / Xóa hướng dẫn viên")
 
-                delete_guide(
-                    selected_guide["id"]
-                )
+            guide_options = {
+                f"{g['id']} - {g['full_name']}": g["id"]
+                for g in guides
+            }
 
-                st.success(
-                    "Đã xóa HDV."
-                )
+            selected_name = st.selectbox(
+                "Chọn hướng dẫn viên",
+                list(guide_options.keys())
+            )
 
-                st.rerun()
+            selected_id = guide_options[selected_name]
 
-    # --------------------------------------------------------
-    # DANH SÁCH
-    # --------------------------------------------------------
+            selected_guide = get_guide(selected_id)
 
-    with tabs[2]:
+            if selected_guide:
 
-        guides = get_guides(
-            include_inactive=True
-        )
-
-        if guides:
-
-            for guide in guides:
-
-                status_icon = (
-                    "🟢"
-                    if guide["status"]
-                    == "Đang làm việc"
-                    else "🔴"
-                )
-
-                with st.expander(
-                    f"{status_icon} "
-                    f"{guide['guide_code']} - "
-                    f"{guide['full_name']}"
-                ):
+                with st.form("edit_guide_form"):
 
                     col1, col2 = st.columns(2)
 
                     with col1:
 
-                        st.write(
-                            f"**Điện thoại:** "
-                            f"{guide['phone'] or '-'}"
+                        edit_name = st.text_input(
+                            "Họ và tên",
+                            value=selected_guide["full_name"]
                         )
 
-                        st.write(
-                            f"**Email:** "
-                            f"{guide['email'] or '-'}"
+                        edit_phone = st.text_input(
+                            "Số điện thoại",
+                            value=selected_guide["phone"] or ""
+                        )
+
+                        edit_email = st.text_input(
+                            "Email",
+                            value=selected_guide["email"] or ""
+                        )
+
+                        edit_language = st.text_input(
+                            "Ngoại ngữ",
+                            value=selected_guide["language"] or ""
                         )
 
                     with col2:
 
-                        st.write(
-                            f"**Ngoại ngữ:** "
-                            f"{guide['languages'] or '-'}"
+                        type_options = [
+                            "HDV nội địa",
+                            "HDV quốc tế",
+                            "HDV theo đoàn",
+                            "HDV tự do"
+                        ]
+
+                        current_type = selected_guide["guide_type"]
+
+                        type_index = (
+                            type_options.index(current_type)
+                            if current_type in type_options
+                            else 0
                         )
 
-                        st.write(
-                            f"**Chuyên môn:** "
-                            f"{guide['specialty'] or '-'}"
+                        edit_type = st.selectbox(
+                            "Loại HDV",
+                            type_options,
+                            index=type_index
+                        )
+
+                        edit_experience = st.number_input(
+                            "Số năm kinh nghiệm",
+                            min_value=0,
+                            max_value=50,
+                            value=int(
+                                selected_guide["experience_years"] or 0
+                            )
+                        )
+
+                        status_options = [
+                            "Đang hoạt động",
+                            "Tạm nghỉ",
+                            "Nghỉ việc"
+                        ]
+
+                        current_status = selected_guide["status"]
+
+                        status_index = (
+                            status_options.index(current_status)
+                            if current_status in status_options
+                            else 0
+                        )
+
+                        edit_status = st.selectbox(
+                            "Trạng thái",
+                            status_options,
+                            index=status_index
+                        )
+
+                        edit_notes = st.text_area(
+                            "Ghi chú",
+                            value=selected_guide["notes"] or ""
+                        )
+
+                    save = st.form_submit_button(
+                        "💾 Lưu thay đổi",
+                        use_container_width=True
+                    )
+
+                    if save:
+
+                        if not edit_name.strip():
+
+                            st.error("Họ tên không được để trống.")
+
+                        else:
+
+                            try:
+
+                                update_guide(
+                                    selected_id,
+                                    edit_name.strip(),
+                                    edit_phone.strip(),
+                                    edit_email.strip(),
+                                    edit_language.strip(),
+                                    edit_type,
+                                    edit_experience,
+                                    edit_status,
+                                    edit_notes.strip()
+                                )
+
+                                st.success(
+                                    "Đã cập nhật thông tin."
+                                )
+
+                                st.rerun()
+
+                            except Exception as e:
+
+                                st.error(
+                                    f"Lỗi cập nhật: {e}"
+                                )
+
+                st.warning(
+                    "⚠️ Xóa hướng dẫn viên sẽ xóa cả các ca và ngày nghỉ "
+                    "đã liên kết với hướng dẫn viên này."
+                )
+
+                if st.button(
+                    "🗑️ Xóa hướng dẫn viên",
+                    type="secondary"
+                ):
+
+                    try:
+
+                        delete_guide(selected_id)
+
+                        st.success(
+                            "Đã xóa hướng dẫn viên."
+                        )
+
+                        st.rerun()
+
+                    except Exception as e:
+
+                        st.error(
+                            f"Không thể xóa: {e}"
                         )
 
 
 # ============================================================
-# PHÂN CA
+# XẾP CA THEO NGÀY
 # ============================================================
 
-elif menu == "📅 Phân ca":
+elif menu == "📅 Xếp ca theo ngày":
 
-    st.header("📅 Phân ca hướng dẫn viên")
+    st.markdown(
+        '<div class="main-title">📅 Xếp ca hướng dẫn viên</div>',
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        '<div class="sub-title">'
+        'Phân công hướng dẫn viên cho từng tour theo ngày và thời gian'
+        '</div>',
+        unsafe_allow_html=True
+    )
 
     guides = get_guides()
 
     if not guides:
 
         st.warning(
-            "Chưa có HDV đang làm việc. "
-            "Hãy thêm HDV trước."
+            "Chưa có hướng dẫn viên đang hoạt động. "
+            "Hãy thêm hướng dẫn viên trước."
         )
 
     else:
 
         guide_options = {
-            f"{g['guide_code']} - {g['full_name']}":
-            g["id"]
+            f"{g['full_name']} | {g['guide_type']}": g["id"]
             for g in guides
         }
 
-        with st.form("create_shift_form"):
+        with st.form("add_shift_form"):
 
-            st.subheader(
-                "1️⃣ Thông tin phân ca"
-            )
+            st.subheader("Thông tin phân ca")
 
             col1, col2 = st.columns(2)
 
             with col1:
 
-                selected_label = st.selectbox(
+                selected_guide_name = st.selectbox(
                     "Hướng dẫn viên *",
                     list(guide_options.keys())
                 )
 
                 selected_guide_id = guide_options[
-                    selected_label
+                    selected_guide_name
                 ]
 
                 shift_date = st.date_input(
                     "Ngày làm việc *",
                     value=date.today()
                 )
-
-                tour_name = st.text_input(
-                    "Tên tour *",
-                    placeholder="Vũng Tàu 2N1Đ"
-                )
-
-                destination = st.text_input(
-                    "Điểm đến",
-                    placeholder="Vũng Tàu"
-                )
-
-            with col2:
 
                 start_time = st.time_input(
                     "Giờ bắt đầu *",
@@ -1499,82 +1199,86 @@ elif menu == "📅 Phân ca":
                     value=time(17, 0)
                 )
 
+            with col2:
+
+                tour_name = st.text_input(
+                    "Tên tour *",
+                    placeholder="VD: Tour Vũng Tàu 1 ngày"
+                )
+
+                destination = st.text_input(
+                    "Điểm đến",
+                    placeholder="VD: Bạch Dinh - Tượng Chúa Kitô - Bãi Sau"
+                )
+
                 tour_type = st.selectbox(
                     "Loại tour",
                     [
-                        "Tour nội địa",
-                        "Tour quốc tế",
+                        "Tour trong ngày",
+                        "Tour nhiều ngày",
                         "City tour",
+                        "Tour tham quan",
                         "Tour đoàn",
-                        "Tour ghép",
-                        "Tour MICE",
                         "Tour học sinh",
-                        "Tour khác"
+                        "Tour doanh nghiệp",
+                        "Khác"
                     ]
                 )
 
                 guest_count = st.number_input(
                     "Số lượng khách",
                     min_value=0,
-                    value=20,
-                    step=1
+                    max_value=10000,
+                    value=20
                 )
 
-            pickup_location = st.text_input(
-                "Điểm đón",
-                placeholder="Ví dụ: Nhà hát TP.HCM"
+                pickup_location = st.text_input(
+                    "Điểm đón khách",
+                    placeholder="VD: Khách sạn ABC"
+                )
+
+                status = st.selectbox(
+                    "Trạng thái ca",
+                    [
+                        "Đã xếp",
+                        "Đang thực hiện",
+                        "Hoàn thành",
+                        "Đã hủy"
+                    ]
+                )
+
+            notes = st.text_area(
+                "Ghi chú"
             )
 
-            note = st.text_area(
-                "Ghi chú",
-                placeholder="Thông tin thêm cho HDV..."
-            )
-
-            submitted = st.form_submit_button(
-                "📅 XẾP CA",
-                type="primary",
+            submit_shift = st.form_submit_button(
+                "➕ XẾP CA",
                 use_container_width=True
             )
 
-        if submitted:
+            if submit_shift:
 
-            # ------------------------------------------------
-            # KIỂM TRA GIỜ
-            # ------------------------------------------------
+                if not tour_name.strip():
 
-            if end_time <= start_time:
+                    st.error("Vui lòng nhập tên tour.")
 
-                st.error(
-                    "❌ Giờ kết thúc phải lớn hơn giờ bắt đầu."
-                )
+                elif end_time <= start_time:
 
-            elif not tour_name.strip():
+                    st.error(
+                        "Giờ kết thúc phải lớn hơn giờ bắt đầu."
+                    )
 
-                st.error(
-                    "❌ Vui lòng nhập tên tour."
-                )
-
-            else:
-
-                # --------------------------------------------
-                # KIỂM TRA NGÀY NGHỈ
-                # --------------------------------------------
-
-                if is_guide_off(
+                elif is_day_off(
                     selected_guide_id,
                     shift_date
                 ):
 
                     st.error(
-                        "🏖️ HDV này đã đăng ký nghỉ vào ngày "
-                        f"{shift_date.strftime('%d/%m/%Y')}."
+                        "❌ Hướng dẫn viên này đã đăng ký nghỉ "
+                        f"ngày {shift_date.strftime('%d/%m/%Y')}."
                     )
 
                 else:
-
-                    # ----------------------------------------
-                    # KIỂM TRA TRÙNG CA
-                    # ----------------------------------------
 
                     conflict = check_shift_conflict(
                         selected_guide_id,
@@ -1586,20 +1290,14 @@ elif menu == "📅 Phân ca":
                     if conflict:
 
                         st.error(
-                            "❌ HDV đã có ca bị trùng thời gian!"
+                            "❌ Hướng dẫn viên đã có ca bị trùng giờ."
                         )
 
-                        st.warning(
-                            f"""
-                            Ca hiện tại:
-
-                            🕐 {conflict['start_time']} -
-                            {conflict['end_time']}
-
-                            🗺️ {conflict['tour_name']}
-
-                            📍 {conflict['destination'] or '-'}
-                            """
+                        st.write(
+                            f"Ca hiện tại: "
+                            f"{conflict['start_time']} - "
+                            f"{conflict['end_time']} | "
+                            f"{conflict['tour_name']}"
                         )
 
                     else:
@@ -1616,11 +1314,12 @@ elif menu == "📅 Phân ca":
                                 tour_type,
                                 guest_count,
                                 pickup_location.strip(),
-                                note.strip()
+                                status,
+                                notes.strip()
                             )
 
                             st.success(
-                                "✅ Phân ca thành công!"
+                                "✅ Đã xếp ca thành công!"
                             )
 
                             st.rerun()
@@ -1628,177 +1327,159 @@ elif menu == "📅 Phân ca":
                         except Exception as e:
 
                             st.error(
-                                f"Lỗi khi lưu ca: {e}"
+                                f"Không thể xếp ca: {e}"
                             )
 
 
 # ============================================================
-# LỊCH PHÂN CA
+# LỊCH LÀM VIỆC
 # ============================================================
 
-elif menu == "🗓️ Lịch phân ca":
+elif menu == "🗓️ Lịch làm việc":
 
-    st.header("🗓️ Lịch phân ca theo ngày")
-
-    guides = get_guides(
-        include_inactive=True
+    st.markdown(
+        '<div class="main-title">🗓️ Lịch làm việc</div>',
+        unsafe_allow_html=True
     )
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
 
-        selected_date = st.date_input(
-            "📅 Chọn ngày",
+        from_date = st.date_input(
+            "Từ ngày",
             value=date.today()
         )
 
     with col2:
 
-        guide_filter_options = {
-            "Tất cả HDV": None
-        }
+        to_date = st.date_input(
+            "Đến ngày",
+            value=date.today() + timedelta(days=6)
+        )
 
-        for guide in guides:
+    guides = get_guides(include_inactive=True)
 
-            guide_filter_options[
-                f"{guide['guide_code']} - "
-                f"{guide['full_name']}"
-            ] = guide["id"]
+    guide_filter_options = {
+        "Tất cả hướng dẫn viên": None
+    }
 
-        selected_guide_label = st.selectbox(
-            "👨‍💼 Lọc theo HDV",
+    for g in guides:
+
+        guide_filter_options[
+            g["full_name"]
+        ] = g["id"]
+
+    with col3:
+
+        selected_guide_filter = st.selectbox(
+            "Hướng dẫn viên",
             list(guide_filter_options.keys())
         )
 
-    selected_guide_id = guide_filter_options[
-        selected_guide_label
-    ]
+    if from_date > to_date:
 
-    shifts = get_shifts(
-        selected_date=selected_date,
-        guide_id=selected_guide_id
-    )
-
-    st.divider()
-
-    st.subheader(
-        f"📅 Ngày {selected_date.strftime('%d/%m/%Y')}"
-    )
-
-    if not shifts:
-
-        st.info(
-            "Ngày này chưa có ca được phân."
-        )
+        st.error("Ngày bắt đầu không được lớn hơn ngày kết thúc.")
 
     else:
 
-        st.success(
-            f"Có {len(shifts)} ca trong ngày."
+        shifts = get_shifts(
+            from_date=from_date,
+            to_date=to_date,
+            guide_id=guide_filter_options[
+                selected_guide_filter
+            ]
         )
 
-        for shift in shifts:
+        st.write(
+            f"**Tổng số ca:** {len(shifts)}"
+        )
 
-            with st.container():
+        if not shifts:
 
-                col1, col2, col3 = st.columns(
-                    [1.5, 4, 1.5]
-                )
+            st.info("Không có ca trong khoảng thời gian này.")
 
-                with col1:
+        else:
 
-                    st.markdown(
-                        f"""
-                        ### 🕐
-                        {shift['start_time']} -
-                        {shift['end_time']}
-                        """
+            display_data = []
+
+            for s in shifts:
+
+                display_data.append({
+                    "Ngày":
+                        s["shift_date"].strftime("%d/%m/%Y"),
+                    "HDV":
+                        s["full_name"],
+                    "Giờ":
+                        f"{s['start_time']} - {s['end_time']}",
+                    "Tour":
+                        s["tour_name"],
+                    "Điểm đến":
+                        s["destination"],
+                    "Loại tour":
+                        s["tour_type"],
+                    "Số khách":
+                        s["guest_count"],
+                    "Điểm đón":
+                        s["pickup_location"],
+                    "Trạng thái":
+                        s["status"]
+                })
+
+            st.dataframe(
+                display_data,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.divider()
+
+            st.subheader("📌 Chi tiết từng ca")
+
+            for s in shifts:
+
+                with st.expander(
+                    f"{s['shift_date'].strftime('%d/%m/%Y')} | "
+                    f"{s['full_name']} | "
+                    f"{s['tour_name']}"
+                ):
+
+                    c1, c2, c3 = st.columns(3)
+
+                    c1.write(
+                        f"**HDV:** {s['full_name']}"
                     )
 
-                    st.caption(
-                        shift["status"]
+                    c2.write(
+                        f"**Thời gian:** "
+                        f"{s['start_time']} - {s['end_time']}"
                     )
 
-                with col2:
-
-                    st.markdown(
-                        f"### 🧑‍💼 {shift['full_name']}"
+                    c3.write(
+                        f"**Số khách:** {s['guest_count']}"
                     )
 
                     st.write(
-                        f"🗺️ **Tour:** "
-                        f"{shift['tour_name']}"
+                        f"**Điểm đến:** {s['destination']}"
                     )
 
                     st.write(
-                        f"📍 **Điểm đến:** "
-                        f"{shift['destination'] or '-'}"
+                        f"**Điểm đón:** {s['pickup_location']}"
                     )
 
                     st.write(
-                        f"👥 **Khách:** "
-                        f"{shift['guest_count']}"
+                        f"**Loại tour:** {s['tour_type']}"
                     )
 
                     st.write(
-                        f"🚐 **Điểm đón:** "
-                        f"{shift['pickup_location'] or '-'}"
+                        f"**Trạng thái:** {s['status']}"
                     )
 
-                with col3:
+                    if s["notes"]:
 
-                    new_status = st.selectbox(
-                        "Trạng thái",
-                        [
-                            "Đã xếp",
-                            "Đang thực hiện",
-                            "Hoàn thành",
-                            "Đã hủy"
-                        ],
-                        index=[
-                            "Đã xếp",
-                            "Đang thực hiện",
-                            "Hoàn thành",
-                            "Đã hủy"
-                        ].index(
-                            shift["status"]
-                        ),
-                        key=f"status_{shift['id']}"
-                    )
-
-                    if st.button(
-                        "💾 Cập nhật",
-                        key=f"update_{shift['id']}"
-                    ):
-
-                        update_shift_status(
-                            shift["id"],
-                            new_status
+                        st.write(
+                            f"**Ghi chú:** {s['notes']}"
                         )
-
-                        st.success(
-                            "Đã cập nhật."
-                        )
-
-                        st.rerun()
-
-                    if st.button(
-                        "🗑️ Xóa ca",
-                        key=f"delete_{shift['id']}"
-                    ):
-
-                        delete_shift(
-                            shift["id"]
-                        )
-
-                        st.success(
-                            "Đã xóa ca."
-                        )
-
-                        st.rerun()
-
-                st.divider()
 
 
 # ============================================================
@@ -1807,308 +1488,461 @@ elif menu == "🗓️ Lịch phân ca":
 
 elif menu == "🏖️ Ngày nghỉ":
 
-    st.header("🏖️ Quản lý ngày nghỉ HDV")
-
-    guides = get_guides(
-        include_inactive=False
+    st.markdown(
+        '<div class="main-title">🏖️ Quản lý ngày nghỉ</div>',
+        unsafe_allow_html=True
     )
+
+    guides = get_guides(include_inactive=True)
 
     if not guides:
 
-        st.warning(
-            "Chưa có HDV đang làm việc."
-        )
+        st.info("Chưa có hướng dẫn viên.")
 
     else:
 
-        st.subheader(
-            "➕ Đăng ký ngày nghỉ"
-        )
+        tab1, tab2 = st.tabs([
+            "➕ Đăng ký ngày nghỉ",
+            "📋 Danh sách ngày nghỉ"
+        ])
 
-        guide_options = {
-            f"{g['guide_code']} - {g['full_name']}":
-            g["id"]
-            for g in guides
-        }
+        with tab1:
 
-        with st.form("day_off_form"):
+            guide_options = {
+                g["full_name"]: g["id"]
+                for g in guides
+            }
 
-            col1, col2, col3 = st.columns(3)
+            with st.form("day_off_form"):
 
-            with col1:
-
-                selected_label = st.selectbox(
+                selected_guide = st.selectbox(
                     "Hướng dẫn viên",
                     list(guide_options.keys())
                 )
-
-            with col2:
 
                 off_date = st.date_input(
                     "Ngày nghỉ",
                     value=date.today()
                 )
 
-            with col3:
-
                 reason = st.text_input(
                     "Lý do",
-                    placeholder="Nghỉ phép..."
+                    placeholder="VD: Nghỉ phép, việc cá nhân..."
                 )
 
-            submitted = st.form_submit_button(
-                "🏖️ Lưu ngày nghỉ",
-                type="primary"
-            )
+                submit_off = st.form_submit_button(
+                    "🏖️ Đăng ký ngày nghỉ",
+                    use_container_width=True
+                )
 
-            if submitted:
+                if submit_off:
 
-                try:
+                    try:
 
-                    add_day_off(
-                        guide_options[selected_label],
-                        off_date,
-                        reason.strip()
+                        add_day_off(
+                            guide_options[selected_guide],
+                            off_date,
+                            reason.strip()
+                        )
+
+                        st.success(
+                            "Đã đăng ký ngày nghỉ."
+                        )
+
+                        st.rerun()
+
+                    except Exception as e:
+
+                        if "Duplicate" in str(e):
+
+                            st.error(
+                                "Hướng dẫn viên đã đăng ký nghỉ "
+                                "ngày này."
+                            )
+
+                        else:
+
+                            st.error(
+                                f"Lỗi: {e}"
+                            )
+
+        with tab2:
+
+            days_off = get_days_off()
+
+            if not days_off:
+
+                st.info("Chưa có ngày nghỉ nào.")
+
+            else:
+
+                for item in days_off:
+
+                    c1, c2, c3, c4 = st.columns([
+                        2, 2, 4, 1
+                    ])
+
+                    c1.write(
+                        f"**{item['full_name']}**"
                     )
 
-                    st.success(
-                        "Đã lưu ngày nghỉ."
+                    c2.write(
+                        item["off_date"].strftime(
+                            "%d/%m/%Y"
+                        )
                     )
 
-                    st.rerun()
-
-                except pymysql.err.IntegrityError:
-
-                    st.error(
-                        "HDV này đã có ngày nghỉ này."
+                    c3.write(
+                        item["reason"] or ""
                     )
 
-                except Exception as e:
+                    if c4.button(
+                        "🗑️",
+                        key=f"delete_off_{item['id']}"
+                    ):
 
-                    st.error(
-                        f"Lỗi: {e}"
-                    )
+                        try:
 
-    st.divider()
+                            delete_day_off(item["id"])
 
-    st.subheader(
-        "📋 Danh sách ngày nghỉ"
+                            st.success(
+                                "Đã xóa ngày nghỉ."
+                            )
+
+                            st.rerun()
+
+                        except Exception as e:
+
+                            st.error(
+                                str(e)
+                            )
+
+
+# ============================================================
+# QUẢN LÝ CA
+# ============================================================
+
+elif menu == "⚙️ Quản lý ca":
+
+    st.markdown(
+        '<div class="main-title">⚙️ Quản lý ca</div>',
+        unsafe_allow_html=True
     )
 
-    day_offs = get_day_offs()
+    shifts = get_shifts()
 
-    if not day_offs:
+    if not shifts:
 
-        st.info(
-            "Chưa có ngày nghỉ nào."
-        )
+        st.info("Chưa có ca nào.")
 
     else:
 
-        for item in day_offs:
-
-            col1, col2, col3, col4 = st.columns(
-                [2, 2, 2, 1]
-            )
-
-            with col1:
-
-                st.write(
-                    f"🧑‍💼 {item['full_name']}"
-                )
-
-            with col2:
-
-                st.write(
-                    item["off_date"].strftime(
-                        "%d/%m/%Y"
-                    )
-                )
-
-            with col3:
-
-                st.write(
-                    item["reason"] or "-"
-                )
-
-            with col4:
-
-                if st.button(
-                    "🗑️",
-                    key=f"delete_off_{item['id']}"
-                ):
-
-                    delete_day_off(
-                        item["id"]
-                    )
-
-                    st.rerun()
-
-
-# ============================================================
-# TẤT CẢ CA
-# ============================================================
-
-elif menu == "📋 Tất cả ca":
-
-    st.header("📋 Tất cả ca phân công")
-
-    guides = get_guides(
-        include_inactive=True
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        filter_date = st.date_input(
-            "📅 Lọc ngày",
-            value=None
-        )
-
-    with col2:
-
-        options = {
-            "Tất cả HDV": None
+        shift_options = {
+            f"#{s['id']} | "
+            f"{s['shift_date'].strftime('%d/%m/%Y')} | "
+            f"{s['full_name']} | "
+            f"{s['tour_name']}": s["id"]
+            for s in shifts
         }
 
-        for guide in guides:
-
-            options[
-                f"{guide['guide_code']} - "
-                f"{guide['full_name']}"
-            ] = guide["id"]
-
-        selected_label = st.selectbox(
-            "👨‍💼 HDV",
-            list(options.keys())
+        selected_shift_text = st.selectbox(
+            "Chọn ca cần chỉnh sửa",
+            list(shift_options.keys())
         )
 
-    filter_guide_id = options[
-        selected_label
-    ]
+        selected_shift_id = shift_options[
+            selected_shift_text
+        ]
 
-    shifts = get_shifts(
-        selected_date=filter_date,
-        guide_id=filter_guide_id
-    )
+        selected_shift = get_shift(
+            selected_shift_id
+        )
 
-    st.write(
-        f"**Tổng số ca:** {len(shifts)}"
-    )
+        if selected_shift:
 
-    if shifts:
+            guides = get_guides(
+                include_inactive=True
+            )
 
-        for shift in shifts:
+            guide_options = {
+                f"{g['id']} - {g['full_name']}":
+                    g["id"]
+                for g in guides
+            }
 
-            with st.expander(
-                f"📅 "
-                f"{shift['shift_date'].strftime('%d/%m/%Y')} "
-                f"| "
-                f"{shift['start_time']} - "
-                f"{shift['end_time']} "
-                f"| "
-                f"{shift['full_name']} "
-                f"| "
-                f"{shift['tour_name']}"
-            ):
+            current_guide_text = next(
+                (
+                    key for key, value
+                    in guide_options.items()
+                    if value == selected_shift["guide_id"]
+                ),
+                list(guide_options.keys())[0]
+            )
+
+            with st.form("edit_shift_form"):
 
                 col1, col2 = st.columns(2)
 
                 with col1:
 
-                    st.write(
-                        f"**HDV:** "
-                        f"{shift['full_name']}"
+                    edit_guide_text = st.selectbox(
+                        "Hướng dẫn viên",
+                        list(guide_options.keys()),
+                        index=list(
+                            guide_options.keys()
+                        ).index(current_guide_text)
                     )
 
-                    st.write(
-                        f"**Mã HDV:** "
-                        f"{shift['guide_code']}"
+                    edit_guide_id = guide_options[
+                        edit_guide_text
+                    ]
+
+                    edit_date = st.date_input(
+                        "Ngày",
+                        value=selected_shift[
+                            "shift_date"
+                        ]
                     )
 
-                    st.write(
-                        f"**Tour:** "
-                        f"{shift['tour_name']}"
+                    edit_start = st.time_input(
+                        "Giờ bắt đầu",
+                        value=(
+                            selected_shift["start_time"]
+                            if isinstance(
+                                selected_shift["start_time"],
+                                time
+                            )
+                            else (
+                                datetime.strptime(
+                                    str(
+                                        selected_shift[
+                                            "start_time"
+                                        ]
+                                    ),
+                                    "%H:%M:%S"
+                                ).time()
+                            )
+                        )
                     )
 
-                    st.write(
-                        f"**Điểm đến:** "
-                        f"{shift['destination'] or '-'}"
-                    )
-
-                    st.write(
-                        f"**Loại tour:** "
-                        f"{shift['tour_type'] or '-'}"
+                    edit_end = st.time_input(
+                        "Giờ kết thúc",
+                        value=(
+                            selected_shift["end_time"]
+                            if isinstance(
+                                selected_shift["end_time"],
+                                time
+                            )
+                            else (
+                                datetime.strptime(
+                                    str(
+                                        selected_shift[
+                                            "end_time"
+                                        ]
+                                    ),
+                                    "%H:%M:%S"
+                                ).time()
+                            )
+                        )
                     )
 
                 with col2:
 
-                    st.write(
-                        f"**Ngày:** "
-                        f"{shift['shift_date'].strftime('%d/%m/%Y')}"
+                    edit_tour = st.text_input(
+                        "Tên tour",
+                        value=selected_shift[
+                            "tour_name"
+                        ]
                     )
 
-                    st.write(
-                        f"**Thời gian:** "
-                        f"{shift['start_time']} - "
-                        f"{shift['end_time']}"
+                    edit_destination = st.text_input(
+                        "Điểm đến",
+                        value=selected_shift[
+                            "destination"
+                        ] or ""
                     )
 
-                    st.write(
-                        f"**Số khách:** "
-                        f"{shift['guest_count']}"
+                    tour_type_options = [
+                        "Tour trong ngày",
+                        "Tour nhiều ngày",
+                        "City tour",
+                        "Tour tham quan",
+                        "Tour đoàn",
+                        "Tour học sinh",
+                        "Tour doanh nghiệp",
+                        "Khác"
+                    ]
+
+                    current_tour_type = selected_shift[
+                        "tour_type"
+                    ]
+
+                    tour_type_index = (
+                        tour_type_options.index(
+                            current_tour_type
+                        )
+                        if current_tour_type
+                        in tour_type_options
+                        else 0
                     )
 
-                    st.write(
-                        f"**Điểm đón:** "
-                        f"{shift['pickup_location'] or '-'}"
+                    edit_tour_type = st.selectbox(
+                        "Loại tour",
+                        tour_type_options,
+                        index=tour_type_index
                     )
 
-                    st.write(
-                        f"**Trạng thái:** "
-                        f"{shift['status']}"
+                    edit_guest_count = st.number_input(
+                        "Số khách",
+                        min_value=0,
+                        max_value=10000,
+                        value=int(
+                            selected_shift[
+                                "guest_count"
+                            ] or 0
+                        )
                     )
 
-                    if shift["note"]:
+                    edit_pickup = st.text_input(
+                        "Điểm đón",
+                        value=selected_shift[
+                            "pickup_location"
+                        ] or ""
+                    )
 
-                        st.write(
-                            f"**Ghi chú:** "
-                            f"{shift['note']}"
+                    status_options = [
+                        "Đã xếp",
+                        "Đang thực hiện",
+                        "Hoàn thành",
+                        "Đã hủy"
+                    ]
+
+                    current_status = selected_shift[
+                        "status"
+                    ]
+
+                    status_index = (
+                        status_options.index(
+                            current_status
+                        )
+                        if current_status in status_options
+                        else 0
+                    )
+
+                    edit_status = st.selectbox(
+                        "Trạng thái",
+                        status_options,
+                        index=status_index
+                    )
+
+                edit_notes = st.text_area(
+                    "Ghi chú",
+                    value=selected_shift[
+                        "notes"
+                    ] or ""
+                )
+
+                save_shift = st.form_submit_button(
+                    "💾 Lưu thay đổi",
+                    use_container_width=True
+                )
+
+                if save_shift:
+
+                    if not edit_tour.strip():
+
+                        st.error(
+                            "Tên tour không được để trống."
                         )
 
-    else:
+                    elif edit_end <= edit_start:
 
-        st.info(
-            "Không có dữ liệu phù hợp."
-        )
+                        st.error(
+                            "Giờ kết thúc phải lớn hơn "
+                            "giờ bắt đầu."
+                        )
 
+                    elif is_day_off(
+                        edit_guide_id,
+                        edit_date
+                    ):
 
-# ============================================================
-# FOOTER
-# ============================================================
+                        st.error(
+                            "Hướng dẫn viên đã đăng ký "
+                            "nghỉ ngày này."
+                        )
 
-st.markdown(
-    """
-    <div class="footer">
+                    else:
 
-        <hr>
+                        conflict = check_shift_conflict(
+                            edit_guide_id,
+                            edit_date,
+                            edit_start,
+                            edit_end,
+                            exclude_shift_id=selected_shift_id
+                        )
 
-        🧭 <b>Tour Guide Shift Manager</b>
+                        if conflict:
 
-        <br>
+                            st.error(
+                                "❌ Ca mới bị trùng với ca khác: "
+                                f"{conflict['tour_name']} "
+                                f"({conflict['start_time']} - "
+                                f"{conflict['end_time']})"
+                            )
 
-        Hệ thống phân ca hướng dẫn viên du lịch
+                        else:
 
-        <br>
+                            try:
 
-        Streamlit + MySQL + Aiven
+                                update_shift(
+                                    selected_shift_id,
+                                    edit_guide_id,
+                                    edit_date,
+                                    edit_start,
+                                    edit_end,
+                                    edit_tour.strip(),
+                                    edit_destination.strip(),
+                                    edit_tour_type,
+                                    edit_guest_count,
+                                    edit_pickup.strip(),
+                                    edit_status,
+                                    edit_notes.strip()
+                                )
 
-        <br><br>
+                                st.success(
+                                    "Đã cập nhật ca."
+                                )
 
-        © 2026
+                                st.rerun()
 
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+                            except Exception as e:
+
+                                st.error(
+                                    f"Lỗi cập nhật ca: {e}"
+                                )
+
+            st.divider()
+
+            if st.button(
+                "🗑️ Xóa ca này",
+                type="secondary"
+            ):
+
+                try:
+
+                    delete_shift(
+                        selected_shift_id
+                    )
+
+                    st.success(
+                        "Đã xóa ca."
+                    )
+
+                    st.rerun()
+
+                except Exception as e:
+
+                    st.error(
+                        f"Không thể xóa ca: {e}"
+                    )
