@@ -1,6 +1,0 @@
-[database]
-host = "mysql-d660cbf-trucly171105-b953.k.aivencloud.com"
-port = 27221
-user = "avnadmin"
-password = "AVNS_cyQyD8Ez8n3Ggy-ax8l"
-database = "defaultdb" # Tên database mặc định trên Aiven
