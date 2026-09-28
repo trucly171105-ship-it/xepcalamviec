@@ -1,1774 +1,846 @@
 import streamlit as st
-from datetime import datetime, date, time, timedelta
+from datetime import date, timedelta
+import random
 
 # ============================================================
-# CẤU HÌNH TRANG
+# APP ĐẶT TOUR THÔNG MINH
+# 3 tính năng chính:
+# 1. Trợ lý AI cá nhân hóa tour
+# 2. Đổi lịch trình thông minh
+# 5. Trợ lý xử lý sự cố
 # ============================================================
 
 st.set_page_config(
-    page_title="Quản lý ca Hướng dẫn viên",
-    page_icon="🧭",
+    page_title="SmartTour - Đặt tour thông minh",
+    page_icon="🧳",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ============================================================
+# -----------------------------
 # CSS
-# ============================================================
-
+# -----------------------------
 st.markdown("""
 <style>
-.main-title {
-    font-size: 32px;
-    font-weight: 700;
-    margin-bottom: 5px;
-}
-
-.sub-title {
-    color: #666;
-    margin-bottom: 25px;
-}
-
-div[data-testid="stMetricValue"] {
-    font-size: 28px;
-}
-
-[data-testid="stSidebar"] {
-    border-right: 1px solid #e5e7eb;
-}
+    .main-title {
+        font-size: 38px;
+        font-weight: 800;
+        margin-bottom: 5px;
+    }
+    .subtitle {
+        color: #666;
+        font-size: 17px;
+        margin-bottom: 25px;
+    }
+    .tour-card {
+        padding: 20px;
+        border-radius: 15px;
+        border: 1px solid #e6e6e6;
+        margin-bottom: 15px;
+        background: white;
+    }
+    .price {
+        font-size: 24px;
+        font-weight: 700;
+    }
+    .feature-card {
+        padding: 18px;
+        border-radius: 14px;
+        background: #f7f9fc;
+        border: 1px solid #e7ebf0;
+        min-height: 150px;
+    }
+    .success-box {
+        padding: 15px;
+        border-radius: 12px;
+        background: #eaf8ef;
+        border: 1px solid #b9e4c7;
+    }
+    .warning-box {
+        padding: 15px;
+        border-radius: 12px;
+        background: #fff8e6;
+        border: 1px solid #f2d58a;
+    }
+    .incident-box {
+        padding: 15px;
+        border-radius: 12px;
+        background: #fff1f1;
+        border: 1px solid #efb3b3;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-
-# ============================================================
-# KHỞI TẠO DỮ LIỆU
-# ============================================================
-
-if "guides" not in st.session_state:
-    st.session_state.guides = []
-
-if "shifts" not in st.session_state:
-    st.session_state.shifts = []
-
-if "days_off" not in st.session_state:
-    st.session_state.days_off = []
-
-if "next_guide_id" not in st.session_state:
-    st.session_state.next_guide_id = 1
-
-if "next_shift_id" not in st.session_state:
-    st.session_state.next_shift_id = 1
-
-if "next_dayoff_id" not in st.session_state:
-    st.session_state.next_dayoff_id = 1
-
-
-# ============================================================
-# HÀM TIỆN ÍCH
-# ============================================================
-
-def get_guide(guide_id):
-    for guide in st.session_state.guides:
-        if guide["id"] == guide_id:
-            return guide
-    return None
-
-
-def get_shift(shift_id):
-    for shift in st.session_state.shifts:
-        if shift["id"] == shift_id:
-            return shift
-    return None
-
-
-def get_active_guides():
-    return [
-        guide
-        for guide in st.session_state.guides
-        if guide["status"] == "Đang hoạt động"
-    ]
-
-
-def is_day_off(guide_id, off_date):
-    for item in st.session_state.days_off:
-        if (
-            item["guide_id"] == guide_id
-            and item["off_date"] == off_date
-        ):
-            return True
-    return False
-
-
-def check_shift_conflict(
-    guide_id,
-    shift_date,
-    start_time,
-    end_time,
-    exclude_shift_id=None
-):
-    """
-    Kiểm tra hai ca có bị trùng thời gian hay không.
-
-    Hai ca bị xem là trùng khi:
-    ca mới bắt đầu trước khi ca cũ kết thúc
-    VÀ
-    ca mới kết thúc sau khi ca cũ bắt đầu.
-    """
-
-    for shift in st.session_state.shifts:
-
-        if exclude_shift_id is not None:
-            if shift["id"] == exclude_shift_id:
-                continue
-
-        if shift["guide_id"] != guide_id:
-            continue
-
-        if shift["shift_date"] != shift_date:
-            continue
-
-        if shift["status"] == "Đã hủy":
-            continue
-
-        if (
-            start_time < shift["end_time"]
-            and end_time > shift["start_time"]
-        ):
-            return shift
-
-    return None
-
-
-def format_date(value):
-    if isinstance(value, date):
-        return value.strftime("%d/%m/%Y")
-    return str(value)
-
-
-def format_time(value):
-    if isinstance(value, time):
-        return value.strftime("%H:%M")
-    return str(value)
-
-
-# ============================================================
-# SIDEBAR
-# ============================================================
-
-st.sidebar.title("🧭 QUẢN LÝ HƯỚNG DẪN VIÊN")
-
-menu = st.sidebar.radio(
-    "Chức năng",
-    [
-        "📊 Tổng quan",
-        "👤 Quản lý hướng dẫn viên",
-        "📅 Xếp ca theo ngày",
-        "🗓️ Lịch làm việc",
-        "🏖️ Ngày nghỉ",
-        "⚙️ Quản lý ca"
-    ]
-)
-
-st.sidebar.divider()
-
-st.sidebar.info(
-    "Ứng dụng quản lý và phân ca "
-    "hướng dẫn viên du lịch."
-)
-
-st.sidebar.caption(
-    f"👤 HDV: {len(st.session_state.guides)}"
-)
-
-st.sidebar.caption(
-    f"📅 Tổng ca: {len(st.session_state.shifts)}"
-)
-
-
-# ============================================================
-# TRANG TỔNG QUAN
-# ============================================================
-
-if menu == "📊 Tổng quan":
-
-    st.markdown(
-        '<div class="main-title">📊 Tổng quan hệ thống</div>',
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        '<div class="sub-title">'
-        'Quản lý và phân ca hướng dẫn viên du lịch'
-        '</div>',
-        unsafe_allow_html=True
-    )
-
-    today = date.today()
-
-    active_guides = get_active_guides()
-
-    today_shifts = [
-        shift
-        for shift in st.session_state.shifts
-        if shift["shift_date"] == today
-    ]
-
-    week_end = today + timedelta(days=6)
-
-    week_shifts = [
-        shift
-        for shift in st.session_state.shifts
-        if today <= shift["shift_date"] <= week_end
-    ]
-
-    completed_today = [
-        shift
-        for shift in today_shifts
-        if shift["status"] == "Hoàn thành"
-    ]
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric(
-        "👤 HDV hoạt động",
-        len(active_guides)
-    )
-
-    col2.metric(
-        "📅 Ca hôm nay",
-        len(today_shifts)
-    )
-
-    col3.metric(
-        "📆 Ca 7 ngày tới",
-        len(week_shifts)
-    )
-
-    col4.metric(
-        "✅ Hoàn thành hôm nay",
-        len(completed_today)
-    )
-
-    st.divider()
-
-    # --------------------------------------------------------
-    # LỊCH HÔM NAY
-    # --------------------------------------------------------
-
-    st.subheader("📅 Lịch làm việc hôm nay")
-
-    if not today_shifts:
-
-        st.info("Hôm nay chưa có ca nào được xếp.")
-
-    else:
-
-        display_data = []
-
-        for shift in sorted(
-            today_shifts,
-            key=lambda x: x["start_time"]
-        ):
-
-            guide = get_guide(
-                shift["guide_id"]
-            )
-
-            display_data.append({
-                "HDV":
-                    guide["full_name"]
-                    if guide else "Không xác định",
-
-                "Thời gian":
-                    f"{format_time(shift['start_time'])}"
-                    f" - "
-                    f"{format_time(shift['end_time'])}",
-
-                "Tour":
-                    shift["tour_name"],
-
-                "Điểm đến":
-                    shift["destination"],
-
-                "Khách":
-                    shift["guest_count"],
-
-                "Trạng thái":
-                    shift["status"]
-            })
-
-        st.dataframe(
-            display_data,
-            use_container_width=True,
-            hide_index=True
-        )
-
-    st.divider()
-
-    # --------------------------------------------------------
-    # THỐNG KÊ
-    # --------------------------------------------------------
-
-    st.subheader(
-        "📈 Thống kê trạng thái ca trong 7 ngày tới"
-    )
-
-    status_counts = {
-        "Đã xếp": 0,
-        "Đang thực hiện": 0,
-        "Hoàn thành": 0,
-        "Đã hủy": 0
+# -----------------------------
+# Dữ liệu mẫu
+# -----------------------------
+TOURS = [
+    {
+        "id": 1,
+        "name": "Phú Quốc 3N2Đ - Khám phá đảo ngọc",
+        "destination": "Phú Quốc",
+        "days": 3,
+        "nights": 2,
+        "price": 4590000,
+        "category": ["biển", "nghỉ dưỡng", "ẩm thực"],
+        "difficulty": "Dễ",
+        "transport": "Máy bay + xe du lịch",
+        "description": "Bãi Sao, Hòn Thơm, chợ đêm và trải nghiệm ẩm thực địa phương.",
+        "schedule": [
+            "Ngày 1: Đón sân bay → nhận phòng → Bãi Sao → ăn tối → chợ đêm",
+            "Ngày 2: Hòn Thơm → cáp treo → vui chơi → ăn tối hải sản",
+            "Ngày 3: Tham quan trung tâm → mua đặc sản → tiễn sân bay"
+        ]
+    },
+    {
+        "id": 2,
+        "name": "Đà Nẵng - Hội An 4N3Đ",
+        "destination": "Đà Nẵng",
+        "days": 4,
+        "nights": 3,
+        "price": 5290000,
+        "category": ["biển", "văn hóa", "ẩm thực", "check-in"],
+        "difficulty": "Dễ",
+        "transport": "Máy bay + xe du lịch",
+        "description": "Bà Nà Hills, phố cổ Hội An, biển Mỹ Khê và ẩm thực miền Trung.",
+        "schedule": [
+            "Ngày 1: Đà Nẵng → nhận phòng → biển Mỹ Khê → cầu Rồng",
+            "Ngày 2: Bà Nà Hills → Cầu Vàng → trở về Đà Nẵng",
+            "Ngày 3: Ngũ Hành Sơn → Hội An → phố cổ → thả đèn",
+            "Ngày 4: Mua đặc sản → tiễn sân bay"
+        ]
+    },
+    {
+        "id": 3,
+        "name": "Đà Lạt 3N2Đ - Săn mây & nghỉ dưỡng",
+        "destination": "Đà Lạt",
+        "days": 3,
+        "nights": 2,
+        "price": 3290000,
+        "category": ["thiên nhiên", "check-in", "nghỉ dưỡng", "ẩm thực"],
+        "difficulty": "Dễ",
+        "transport": "Xe du lịch",
+        "description": "Săn mây, đồi chè, vườn hoa và trải nghiệm cà phê Đà Lạt.",
+        "schedule": [
+            "Ngày 1: Đà Lạt → nhận phòng → quảng trường → chợ đêm",
+            "Ngày 2: Săn mây → đồi chè → vườn hoa → cà phê",
+            "Ngày 3: Dinh thự → mua đặc sản → kết thúc tour"
+        ]
+    },
+    {
+        "id": 4,
+        "name": "Nha Trang 3N2Đ - Biển & vui chơi",
+        "destination": "Nha Trang",
+        "days": 3,
+        "nights": 2,
+        "price": 3990000,
+        "category": ["biển", "nghỉ dưỡng", "vui chơi"],
+        "difficulty": "Dễ",
+        "transport": "Máy bay + xe du lịch",
+        "description": "Biển Nha Trang, đảo, vui chơi và khám phá ẩm thực.",
+        "schedule": [
+            "Ngày 1: Nhận phòng → biển Nha Trang → ăn tối",
+            "Ngày 2: Tour đảo → vui chơi → ăn hải sản",
+            "Ngày 3: Tham quan thành phố → mua đặc sản → kết thúc"
+        ]
+    },
+    {
+        "id": 5,
+        "name": "Huế 3N2Đ - Dấu ấn hoàng triều",
+        "destination": "Huế",
+        "days": 3,
+        "nights": 2,
+        "price": 3490000,
+        "category": ["văn hóa", "lịch sử", "ẩm thực"],
+        "difficulty": "Dễ",
+        "transport": "Xe du lịch",
+        "description": "Đại Nội, lăng vua, chùa Thiên Mụ và ẩm thực cung đình.",
+        "schedule": [
+            "Ngày 1: Đại Nội → Đông Ba → thưởng thức ẩm thực Huế",
+            "Ngày 2: Lăng vua → chùa Thiên Mụ → sông Hương",
+            "Ngày 3: Mua đặc sản → tham quan tự do → kết thúc"
+        ]
     }
+]
 
-    for shift in week_shifts:
+# -----------------------------
+# Session state
+# -----------------------------
+if "page" not in st.session_state:
+    st.session_state.page = "Trang chủ"
 
-        if shift["status"] in status_counts:
-            status_counts[
-                shift["status"]
-            ] += 1
+if "selected_tour" not in st.session_state:
+    st.session_state.selected_tour = None
 
-    chart_data = {
-        "Trạng thái": list(
-            status_counts.keys()
-        ),
-        "Số ca": list(
-            status_counts.values()
-        )
-    }
+if "booking" not in st.session_state:
+    st.session_state.booking = None
 
-    st.bar_chart(
-        chart_data,
-        x="Trạng thái",
-        y="Số ca"
-    )
+if "custom_tour" not in st.session_state:
+    st.session_state.custom_tour = None
+
+if "incident_result" not in st.session_state:
+    st.session_state.incident_result = None
 
 
-# ============================================================
-# QUẢN LÝ HƯỚNG DẪN VIÊN
-# ============================================================
+def money(value):
+    return f"{value:,.0f} VNĐ".replace(",", ".")
 
-elif menu == "👤 Quản lý hướng dẫn viên":
 
-    st.markdown(
-        '<div class="main-title">'
-        '👤 Quản lý hướng dẫn viên'
-        '</div>',
-        unsafe_allow_html=True
-    )
+def find_tour_by_id(tour_id):
+    return next((t for t in TOURS if t["id"] == tour_id), None)
 
-    tab1, tab2 = st.tabs([
-        "➕ Thêm hướng dẫn viên",
-        "📋 Danh sách hướng dẫn viên"
-    ])
 
-    # ========================================================
-    # THÊM HDV
-    # ========================================================
+def recommend_tours(days, budget, people, interests, style):
+    """
+    Bộ máy đề xuất tour dạng rule-based.
+    Có thể thay bằng API AI thật sau này.
+    """
+    results = []
 
-    with tab1:
+    for tour in TOURS:
+        score = 0
 
-        with st.form("add_guide_form"):
+        # Thời lượng
+        difference = abs(tour["days"] - days)
+        if difference == 0:
+            score += 30
+        elif difference == 1:
+            score += 18
+        elif difference == 2:
+            score += 8
 
-            st.subheader(
-                "Thông tin hướng dẫn viên"
-            )
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-
-                full_name = st.text_input(
-                    "Họ và tên *"
-                )
-
-                phone = st.text_input(
-                    "Số điện thoại"
-                )
-
-                email = st.text_input(
-                    "Email"
-                )
-
-                language = st.text_input(
-                    "Ngoại ngữ",
-                    placeholder=(
-                        "VD: Tiếng Anh, Tiếng Trung"
-                    )
-                )
-
-            with col2:
-
-                guide_type = st.selectbox(
-                    "Loại hướng dẫn viên",
-                    [
-                        "HDV nội địa",
-                        "HDV quốc tế",
-                        "HDV theo đoàn",
-                        "HDV tự do"
-                    ]
-                )
-
-                experience_years = st.number_input(
-                    "Số năm kinh nghiệm",
-                    min_value=0,
-                    max_value=50,
-                    value=0
-                )
-
-                status = st.selectbox(
-                    "Trạng thái",
-                    [
-                        "Đang hoạt động",
-                        "Tạm nghỉ",
-                        "Nghỉ việc"
-                    ]
-                )
-
-                notes = st.text_area(
-                    "Ghi chú"
-                )
-
-            submitted = st.form_submit_button(
-                "➕ Thêm hướng dẫn viên",
-                use_container_width=True
-            )
-
-            if submitted:
-
-                if not full_name.strip():
-
-                    st.error(
-                        "Vui lòng nhập họ tên."
-                    )
-
-                else:
-
-                    new_guide = {
-                        "id":
-                            st.session_state.next_guide_id,
-
-                        "full_name":
-                            full_name.strip(),
-
-                        "phone":
-                            phone.strip(),
-
-                        "email":
-                            email.strip(),
-
-                        "language":
-                            language.strip(),
-
-                        "guide_type":
-                            guide_type,
-
-                        "experience_years":
-                            experience_years,
-
-                        "status":
-                            status,
-
-                        "notes":
-                            notes.strip()
-                    }
-
-                    st.session_state.guides.append(
-                        new_guide
-                    )
-
-                    st.session_state.next_guide_id += 1
-
-                    st.success(
-                        f"Đã thêm hướng dẫn viên: "
-                        f"{full_name}"
-                    )
-
-                    st.rerun()
-
-    # ========================================================
-    # DANH SÁCH HDV
-    # ========================================================
-
-    with tab2:
-
-        guides = st.session_state.guides
-
-        if not guides:
-
-            st.info(
-                "Chưa có hướng dẫn viên."
-            )
-
+        # Ngân sách
+        if tour["price"] <= budget:
+            score += 25
+            if tour["price"] >= budget * 0.75:
+                score += 5
         else:
+            over = tour["price"] - budget
+            if over <= 500000:
+                score += 8
 
-            display_data = []
+        # Số khách
+        if people >= 4:
+            score += 5
 
-            for guide in guides:
+        # Sở thích
+        for interest in interests:
+            if interest in tour["category"]:
+                score += 12
 
-                display_data.append({
-                    "ID":
-                        guide["id"],
+        # Phong cách
+        if style == "Nghỉ dưỡng" and "nghỉ dưỡng" in tour["category"]:
+            score += 15
+        elif style == "Khám phá" and (
+            "văn hóa" in tour["category"] or "lịch sử" in tour["category"]
+        ):
+            score += 15
+        elif style == "Check-in" and "check-in" in tour["category"]:
+            score += 15
+        elif style == "Ẩm thực" and "ẩm thực" in tour["category"]:
+            score += 15
 
-                    "Họ tên":
-                        guide["full_name"],
+        results.append((score, tour))
 
-                    "Điện thoại":
-                        guide["phone"],
-
-                    "Email":
-                        guide["email"],
-
-                    "Ngoại ngữ":
-                        guide["language"],
-
-                    "Loại HDV":
-                        guide["guide_type"],
-
-                    "Kinh nghiệm":
-                        f"{guide['experience_years']} năm",
-
-                    "Trạng thái":
-                        guide["status"]
-                })
-
-            st.dataframe(
-                display_data,
-                use_container_width=True,
-                hide_index=True
-            )
-
-            st.divider()
-
-            st.subheader(
-                "✏️ Chỉnh sửa / Xóa hướng dẫn viên"
-            )
-
-            guide_options = {
-                f"{g['id']} - {g['full_name']}":
-                    g["id"]
-                for g in guides
-            }
-
-            selected_name = st.selectbox(
-                "Chọn hướng dẫn viên",
-                list(guide_options.keys())
-            )
-
-            selected_id = guide_options[
-                selected_name
-            ]
-
-            selected_guide = get_guide(
-                selected_id
-            )
-
-            if selected_guide:
-
-                with st.form(
-                    "edit_guide_form"
-                ):
-
-                    col1, col2 = st.columns(2)
-
-                    with col1:
-
-                        edit_name = st.text_input(
-                            "Họ và tên",
-                            value=selected_guide[
-                                "full_name"
-                            ]
-                        )
-
-                        edit_phone = st.text_input(
-                            "Số điện thoại",
-                            value=selected_guide[
-                                "phone"
-                            ]
-                        )
-
-                        edit_email = st.text_input(
-                            "Email",
-                            value=selected_guide[
-                                "email"
-                            ]
-                        )
-
-                        edit_language = st.text_input(
-                            "Ngoại ngữ",
-                            value=selected_guide[
-                                "language"
-                            ]
-                        )
-
-                    with col2:
-
-                        type_options = [
-                            "HDV nội địa",
-                            "HDV quốc tế",
-                            "HDV theo đoàn",
-                            "HDV tự do"
-                        ]
-
-                        current_type = (
-                            selected_guide[
-                                "guide_type"
-                            ]
-                        )
-
-                        type_index = (
-                            type_options.index(
-                                current_type
-                            )
-                            if current_type
-                            in type_options
-                            else 0
-                        )
-
-                        edit_type = st.selectbox(
-                            "Loại HDV",
-                            type_options,
-                            index=type_index
-                        )
-
-                        edit_experience = (
-                            st.number_input(
-                                "Số năm kinh nghiệm",
-                                min_value=0,
-                                max_value=50,
-                                value=int(
-                                    selected_guide[
-                                        "experience_years"
-                                    ]
-                                )
-                            )
-                        )
-
-                        status_options = [
-                            "Đang hoạt động",
-                            "Tạm nghỉ",
-                            "Nghỉ việc"
-                        ]
-
-                        current_status = (
-                            selected_guide[
-                                "status"
-                            ]
-                        )
-
-                        status_index = (
-                            status_options.index(
-                                current_status
-                            )
-                            if current_status
-                            in status_options
-                            else 0
-                        )
-
-                        edit_status = st.selectbox(
-                            "Trạng thái",
-                            status_options,
-                            index=status_index
-                        )
-
-                        edit_notes = st.text_area(
-                            "Ghi chú",
-                            value=selected_guide[
-                                "notes"
-                            ]
-                        )
-
-                    save = st.form_submit_button(
-                        "💾 Lưu thay đổi",
-                        use_container_width=True
-                    )
-
-                    if save:
-
-                        if not edit_name.strip():
-
-                            st.error(
-                                "Họ tên không được để trống."
-                            )
-
-                        else:
-
-                            selected_guide[
-                                "full_name"
-                            ] = edit_name.strip()
-
-                            selected_guide[
-                                "phone"
-                            ] = edit_phone.strip()
-
-                            selected_guide[
-                                "email"
-                            ] = edit_email.strip()
-
-                            selected_guide[
-                                "language"
-                            ] = edit_language.strip()
-
-                            selected_guide[
-                                "guide_type"
-                            ] = edit_type
-
-                            selected_guide[
-                                "experience_years"
-                            ] = edit_experience
-
-                            selected_guide[
-                                "status"
-                            ] = edit_status
-
-                            selected_guide[
-                                "notes"
-                            ] = edit_notes.strip()
-
-                            st.success(
-                                "Đã cập nhật thông tin."
-                            )
-
-                            st.rerun()
-
-                st.warning(
-                    "⚠️ Xóa hướng dẫn viên sẽ xóa "
-                    "cả các ca và ngày nghỉ liên quan."
-                )
-
-                if st.button(
-                    "🗑️ Xóa hướng dẫn viên",
-                    type="secondary"
-                ):
-
-                    st.session_state.guides = [
-                        g
-                        for g
-                        in st.session_state.guides
-                        if g["id"] != selected_id
-                    ]
-
-                    st.session_state.shifts = [
-                        s
-                        for s
-                        in st.session_state.shifts
-                        if s["guide_id"] != selected_id
-                    ]
-
-                    st.session_state.days_off = [
-                        d
-                        for d
-                        in st.session_state.days_off
-                        if d["guide_id"] != selected_id
-                    ]
-
-                    st.success(
-                        "Đã xóa hướng dẫn viên."
-                    )
-
-                    st.rerun()
+    results.sort(key=lambda x: x[0], reverse=True)
+    return results[:3]
 
 
-# ============================================================
-# XẾP CA THEO NGÀY
-# ============================================================
+def build_custom_schedule(tour, date_start, people):
+    result = []
+    for index, item in enumerate(tour["schedule"]):
+        current_date = date_start + timedelta(days=index)
+        result.append(f"{current_date.strftime('%d/%m/%Y')} — {item}")
+    return result
 
-elif menu == "📅 Xếp ca theo ngày":
 
-    st.markdown(
-        '<div class="main-title">'
-        '📅 Xếp ca hướng dẫn viên'
-        '</div>',
-        unsafe_allow_html=True
+# -----------------------------
+# Sidebar
+# -----------------------------
+with st.sidebar:
+    st.markdown("## 🧳 SmartTour")
+    st.caption("Đặt tour & điều hành tour thông minh")
+
+    menu = st.radio(
+        "MENU",
+        [
+            "Trang chủ",
+            "🤖 Tạo tour bằng AI",
+            "🗺️ Khám phá & đặt tour",
+            "🔄 Đổi lịch trình thông minh",
+            "🚨 Trợ lý xử lý sự cố",
+            "📋 Đơn đặt tour"
+        ],
+        index=0
     )
 
-    st.markdown(
-        '<div class="sub-title">'
-        'Phân công hướng dẫn viên cho từng tour '
-        'theo ngày và thời gian'
-        '</div>',
-        unsafe_allow_html=True
-    )
-
-    guides = get_active_guides()
-
-    if not guides:
-
-        st.warning(
-            "Chưa có hướng dẫn viên đang hoạt động. "
-            "Hãy thêm hướng dẫn viên trước."
-        )
-
+    if menu == "Trang chủ":
+        st.session_state.page = "Trang chủ"
+    elif "Tạo tour" in menu:
+        st.session_state.page = "AI"
+    elif "Khám phá" in menu:
+        st.session_state.page = "TOURS"
+    elif "Đổi lịch" in menu:
+        st.session_state.page = "CHANGE"
+    elif "sự cố" in menu:
+        st.session_state.page = "INCIDENT"
     else:
+        st.session_state.page = "BOOKING"
 
-        guide_options = {
-            f"{g['full_name']} | {g['guide_type']}":
-                g["id"]
-            for g in guides
-        }
-
-        with st.form("add_shift_form"):
-
-            st.subheader(
-                "Thông tin phân ca"
-            )
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-
-                selected_guide_name = st.selectbox(
-                    "Hướng dẫn viên *",
-                    list(guide_options.keys())
-                )
-
-                selected_guide_id = guide_options[
-                    selected_guide_name
-                ]
-
-                shift_date = st.date_input(
-                    "Ngày làm việc *",
-                    value=date.today()
-                )
-
-                start_time = st.time_input(
-                    "Giờ bắt đầu *",
-                    value=time(8, 0)
-                )
-
-                end_time = st.time_input(
-                    "Giờ kết thúc *",
-                    value=time(17, 0)
-                )
-
-            with col2:
-
-                tour_name = st.text_input(
-                    "Tên tour *",
-                    placeholder=(
-                        "VD: Tour Vũng Tàu 1 ngày"
-                    )
-                )
-
-                destination = st.text_input(
-                    "Điểm đến",
-                    placeholder=(
-                        "VD: Bạch Dinh - Tượng Chúa "
-                        "Kitô - Bãi Sau"
-                    )
-                )
-
-                tour_type = st.selectbox(
-                    "Loại tour",
-                    [
-                        "Tour trong ngày",
-                        "Tour nhiều ngày",
-                        "City tour",
-                        "Tour tham quan",
-                        "Tour đoàn",
-                        "Tour học sinh",
-                        "Tour doanh nghiệp",
-                        "Khác"
-                    ]
-                )
-
-                guest_count = st.number_input(
-                    "Số lượng khách",
-                    min_value=0,
-                    max_value=10000,
-                    value=20
-                )
-
-                pickup_location = st.text_input(
-                    "Điểm đón khách",
-                    placeholder=(
-                        "VD: Khách sạn ABC"
-                    )
-                )
-
-                status = st.selectbox(
-                    "Trạng thái ca",
-                    [
-                        "Đã xếp",
-                        "Đang thực hiện",
-                        "Hoàn thành",
-                        "Đã hủy"
-                    ]
-                )
-
-            notes = st.text_area(
-                "Ghi chú"
-            )
-
-            submit_shift = st.form_submit_button(
-                "➕ XẾP CA",
-                use_container_width=True
-            )
-
-            if submit_shift:
-
-                if not tour_name.strip():
-
-                    st.error(
-                        "Vui lòng nhập tên tour."
-                    )
-
-                elif end_time <= start_time:
-
-                    st.error(
-                        "Giờ kết thúc phải lớn hơn "
-                        "giờ bắt đầu."
-                    )
-
-                elif is_day_off(
-                    selected_guide_id,
-                    shift_date
-                ):
-
-                    st.error(
-                        "❌ Hướng dẫn viên này đã đăng ký "
-                        f"nghỉ ngày "
-                        f"{format_date(shift_date)}."
-                    )
-
-                else:
-
-                    conflict = check_shift_conflict(
-                        selected_guide_id,
-                        shift_date,
-                        start_time,
-                        end_time
-                    )
-
-                    if conflict:
-
-                        guide = get_guide(
-                            selected_guide_id
-                        )
-
-                        st.error(
-                            "❌ Hướng dẫn viên đã có ca "
-                            "bị trùng giờ."
-                        )
-
-                        st.warning(
-                            f"HDV: "
-                            f"{guide['full_name']}\n\n"
-                            f"Ca hiện tại: "
-                            f"{format_time(conflict['start_time'])}"
-                            f" - "
-                            f"{format_time(conflict['end_time'])}"
-                            f"\n\n"
-                            f"Tour: "
-                            f"{conflict['tour_name']}"
-                        )
-
-                    else:
-
-                        new_shift = {
-                            "id":
-                                st.session_state.next_shift_id,
-
-                            "guide_id":
-                                selected_guide_id,
-
-                            "shift_date":
-                                shift_date,
-
-                            "start_time":
-                                start_time,
-
-                            "end_time":
-                                end_time,
-
-                            "tour_name":
-                                tour_name.strip(),
-
-                            "destination":
-                                destination.strip(),
-
-                            "tour_type":
-                                tour_type,
-
-                            "guest_count":
-                                guest_count,
-
-                            "pickup_location":
-                                pickup_location.strip(),
-
-                            "status":
-                                status,
-
-                            "notes":
-                                notes.strip()
-                        }
-
-                        st.session_state.shifts.append(
-                            new_shift
-                        )
-
-                        st.session_state.next_shift_id += 1
-
-                        st.success(
-                            "✅ Đã xếp ca thành công!"
-                        )
-
-                        st.rerun()
+    st.divider()
+    st.info(
+        "💡 Đây là phiên bản demo không cần MySQL/API. "
+        "Dữ liệu được lưu trong session của phiên chạy."
+    )
 
 
 # ============================================================
-# LỊCH LÀM VIỆC
+# TRANG CHỦ
 # ============================================================
-
-elif menu == "🗓️ Lịch làm việc":
-
+if st.session_state.page == "Trang chủ":
+    st.markdown('<div class="main-title">🧳 SmartTour</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="main-title">'
-        '🗓️ Lịch làm việc'
-        '</div>',
+        '<div class="subtitle">Nền tảng đặt tour thông minh — cá nhân hóa, linh hoạt và hỗ trợ khách trong suốt hành trình.</div>',
         unsafe_allow_html=True
     )
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
-
-        from_date = st.date_input(
-            "Từ ngày",
-            value=date.today()
-        )
+        st.markdown("""
+        <div class="feature-card">
+        <h3>🤖 AI cá nhân hóa</h3>
+        <p>Nhập ngân sách, thời gian và sở thích. Hệ thống đề xuất tour phù hợp.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
     with col2:
-
-        to_date = st.date_input(
-            "Đến ngày",
-            value=date.today() + timedelta(days=6)
-        )
+        st.markdown("""
+        <div class="feature-card">
+        <h3>🔄 Đổi lịch thông minh</h3>
+        <p>Khi thời tiết hoặc điều kiện thay đổi, app đề xuất phương án thay thế.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
     with col3:
+        st.markdown("""
+        <div class="feature-card">
+        <h3>🚨 Hỗ trợ sự cố</h3>
+        <p>Khách có thể báo sự cố và nhận hướng xử lý ngay trên app.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-        guide_filter_options = {
-            "Tất cả hướng dẫn viên": None
-        }
+    st.write("")
+    st.subheader("⭐ Các tour nổi bật")
 
-        for guide in st.session_state.guides:
+    cols = st.columns(3)
+    for i, tour in enumerate(TOURS[:3]):
+        with cols[i]:
+            st.markdown(f"### {tour['name']}")
+            st.write(tour["description"])
+            st.write(f"**Từ {money(tour['price'])}/người**")
+            if st.button("Xem tour", key=f"home_tour_{tour['id']}"):
+                st.session_state.selected_tour = tour["id"]
+                st.session_state.page = "TOURS"
+                st.rerun()
 
-            guide_filter_options[
-                guide["full_name"]
-            ] = guide["id"]
-
-        selected_guide_filter = st.selectbox(
-            "Hướng dẫn viên",
-            list(guide_filter_options.keys())
-        )
-
-    if from_date > to_date:
-
-        st.error(
-            "Ngày bắt đầu không được lớn hơn ngày kết thúc."
-        )
-
-    else:
-
-        selected_guide_id = guide_filter_options[
-            selected_guide_filter
-        ]
-
-        filtered_shifts = []
-
-        for shift in st.session_state.shifts:
-
-            if not (
-                from_date
-                <= shift["shift_date"]
-                <= to_date
-            ):
-                continue
-
-            if (
-                selected_guide_id is not None
-                and shift["guide_id"]
-                != selected_guide_id
-            ):
-                continue
-
-            filtered_shifts.append(
-                shift
-            )
-
-        filtered_shifts.sort(
-            key=lambda x: (
-                x["shift_date"],
-                x["start_time"]
-            )
-        )
-
-        st.write(
-            f"**Tổng số ca:** "
-            f"{len(filtered_shifts)}"
-        )
-
-        if not filtered_shifts:
-
-            st.info(
-                "Không có ca trong khoảng thời gian này."
-            )
-
-        else:
-
-            display_data = []
-
-            for shift in filtered_shifts:
-
-                guide = get_guide(
-                    shift["guide_id"]
-                )
-
-                display_data.append({
-                    "Ngày":
-                        format_date(
-                            shift["shift_date"]
-                        ),
-
-                    "HDV":
-                        guide["full_name"]
-                        if guide
-                        else "Không xác định",
-
-                    "Giờ":
-                        f"{format_time(shift['start_time'])}"
-                        f" - "
-                        f"{format_time(shift['end_time'])}",
-
-                    "Tour":
-                        shift["tour_name"],
-
-                    "Điểm đến":
-                        shift["destination"],
-
-                    "Loại tour":
-                        shift["tour_type"],
-
-                    "Số khách":
-                        shift["guest_count"],
-
-                    "Điểm đón":
-                        shift["pickup_location"],
-
-                    "Trạng thái":
-                        shift["status"]
-                })
-
-            st.dataframe(
-                display_data,
-                use_container_width=True,
-                hide_index=True
-            )
-
-            st.divider()
-
-            st.subheader(
-                "📌 Chi tiết từng ca"
-            )
-
-            for shift in filtered_shifts:
-
-                guide = get_guide(
-                    shift["guide_id"]
-                )
-
-                guide_name = (
-                    guide["full_name"]
-                    if guide
-                    else "Không xác định"
-                )
-
-                with st.expander(
-                    f"{format_date(shift['shift_date'])}"
-                    f" | {guide_name}"
-                    f" | {shift['tour_name']}"
-                ):
-
-                    c1, c2, c3 = st.columns(3)
-
-                    c1.write(
-                        f"**HDV:** {guide_name}"
-                    )
-
-                    c2.write(
-                        f"**Thời gian:** "
-                        f"{format_time(shift['start_time'])}"
-                        f" - "
-                        f"{format_time(shift['end_time'])}"
-                    )
-
-                    c3.write(
-                        f"**Số khách:** "
-                        f"{shift['guest_count']}"
-                    )
-
-                    st.write(
-                        f"**Điểm đến:** "
-                        f"{shift['destination']}"
-                    )
-
-                    st.write(
-                        f"**Điểm đón:** "
-                        f"{shift['pickup_location']}"
-                    )
-
-                    st.write(
-                        f"**Loại tour:** "
-                        f"{shift['tour_type']}"
-                    )
-
-                    st.write(
-                        f"**Trạng thái:** "
-                        f"{shift['status']}"
-                    )
-
-                    if shift["notes"]:
-
-                        st.write(
-                            f"**Ghi chú:** "
-                            f"{shift['notes']}"
-                        )
+    st.divider()
+    st.subheader("⚙️ Quy trình sử dụng")
+    st.markdown("""
+    **1. Nhập nhu cầu → 2. Nhận đề xuất → 3. Chọn tour → 
+    4. Đặt tour → 5. Theo dõi & thay đổi lịch trình → 6. Hỗ trợ sự cố**
+    """)
 
 
 # ============================================================
-# NGÀY NGHỈ
+# TÍNH NĂNG 1 — AI TẠO TOUR
 # ============================================================
-
-elif menu == "🏖️ Ngày nghỉ":
-
-    st.markdown(
-        '<div class="main-title">'
-        '🏖️ Quản lý ngày nghỉ'
-        '</div>',
-        unsafe_allow_html=True
+elif st.session_state.page == "AI":
+    st.title("🤖 Trợ lý AI cá nhân hóa tour")
+    st.write(
+        "Cho hệ thống biết nhu cầu của bạn. SmartTour sẽ chấm điểm và "
+        "đề xuất những tour phù hợp nhất."
     )
 
-    guides = st.session_state.guides
+    with st.form("ai_form"):
+        col1, col2 = st.columns(2)
 
-    if not guides:
-
-        st.info(
-            "Chưa có hướng dẫn viên."
-        )
-
-    else:
-
-        tab1, tab2 = st.tabs([
-            "➕ Đăng ký ngày nghỉ",
-            "📋 Danh sách ngày nghỉ"
-        ])
-
-        # ----------------------------------------------------
-        # THÊM NGÀY NGHỈ
-        # ----------------------------------------------------
-
-        with tab1:
-
-            guide_options = {
-                guide["full_name"]:
-                    guide["id"]
-                for guide in guides
-            }
-
-            with st.form("day_off_form"):
-
-                selected_guide = st.selectbox(
-                    "Hướng dẫn viên",
-                    list(guide_options.keys())
-                )
-
-                off_date = st.date_input(
-                    "Ngày nghỉ",
-                    value=date.today()
-                )
-
-                reason = st.text_input(
-                    "Lý do",
-                    placeholder=(
-                        "VD: Nghỉ phép, việc cá nhân..."
-                    )
-                )
-
-                submit_off = st.form_submit_button(
-                    "🏖️ Đăng ký ngày nghỉ",
-                    use_container_width=True
-                )
-
-                if submit_off:
-
-                    guide_id = guide_options[
-                        selected_guide
-                    ]
-
-                    if is_day_off(
-                        guide_id,
-                        off_date
-                    ):
-
-                        st.error(
-                            "Hướng dẫn viên đã đăng ký "
-                            "nghỉ ngày này."
-                        )
-
-                    else:
-
-                        new_day_off = {
-                            "id":
-                                st.session_state.next_dayoff_id,
-
-                            "guide_id":
-                                guide_id,
-
-                            "off_date":
-                                off_date,
-
-                            "reason":
-                                reason.strip()
-                        }
-
-                        st.session_state.days_off.append(
-                            new_day_off
-                        )
-
-                        st.session_state.next_dayoff_id += 1
-
-                        st.success(
-                            "Đã đăng ký ngày nghỉ."
-                        )
-
-                        st.rerun()
-
-        # ----------------------------------------------------
-        # DANH SÁCH NGÀY NGHỈ
-        # ----------------------------------------------------
-
-        with tab2:
-
-            days_off = sorted(
-                st.session_state.days_off,
-                key=lambda x: x["off_date"],
-                reverse=True
+        with col1:
+            destination = st.selectbox(
+                "Điểm đến mong muốn",
+                ["Không giới hạn"] + sorted(list(set(t["destination"] for t in TOURS)))
             )
 
-            if not days_off:
+            days = st.slider("Số ngày mong muốn", 2, 7, 3)
 
-                st.info(
-                    "Chưa có ngày nghỉ nào."
-                )
-
-            else:
-
-                for item in days_off:
-
-                    guide = get_guide(
-                        item["guide_id"]
-                    )
-
-                    guide_name = (
-                        guide["full_name"]
-                        if guide
-                        else "Không xác định"
-                    )
-
-                    c1, c2, c3, c4 = st.columns([
-                        2, 2, 4, 1
-                    ])
-
-                    c1.write(
-                        f"**{guide_name}**"
-                    )
-
-                    c2.write(
-                        format_date(
-                            item["off_date"]
-                        )
-                    )
-
-                    c3.write(
-                        item["reason"]
-                    )
-
-                    if c4.button(
-                        "🗑️",
-                        key=f"delete_off_{item['id']}"
-                    ):
-
-                        st.session_state.days_off = [
-                            d
-                            for d
-                            in st.session_state.days_off
-                            if d["id"]
-                            != item["id"]
-                        ]
-
-                        st.success(
-                            "Đã xóa ngày nghỉ."
-                        )
-
-                        st.rerun()
-
-
-# ============================================================
-# QUẢN LÝ CA
-# ============================================================
-
-elif menu == "⚙️ Quản lý ca":
-
-    st.markdown(
-        '<div class="main-title">'
-        '⚙️ Quản lý ca'
-        '</div>',
-        unsafe_allow_html=True
-    )
-
-    shifts = sorted(
-        st.session_state.shifts,
-        key=lambda x: (
-            x["shift_date"],
-            x["start_time"]
-        )
-    )
-
-    if not shifts:
-
-        st.info(
-            "Chưa có ca nào."
-        )
-
-    else:
-
-        shift_options = {}
-
-        for shift in shifts:
-
-            guide = get_guide(
-                shift["guide_id"]
+            budget = st.number_input(
+                "Ngân sách / người (VNĐ)",
+                min_value=1000000,
+                max_value=50000000,
+                value=5000000,
+                step=500000
             )
 
-            guide_name = (
-                guide["full_name"]
-                if guide
-                else "Không xác định"
+        with col2:
+            people = st.number_input(
+                "Số người",
+                min_value=1,
+                max_value=100,
+                value=2,
+                step=1
             )
 
-            shift_options[
-                f"#{shift['id']} | "
-                f"{format_date(shift['shift_date'])} | "
-                f"{guide_name} | "
-                f"{shift['tour_name']}"
-            ] = shift["id"]
-
-        selected_shift_text = st.selectbox(
-            "Chọn ca cần chỉnh sửa",
-            list(shift_options.keys())
-        )
-
-        selected_shift_id = shift_options[
-            selected_shift_text
-        ]
-
-        selected_shift = get_shift(
-            selected_shift_id
-        )
-
-        if selected_shift:
-
-            guide_options = {
-                f"{g['id']} - {g['full_name']}":
-                    g["id"]
-                for g in st.session_state.guides
-            }
-
-            current_guide_text = next(
-                (
-                    key
-                    for key, value
-                    in guide_options.items()
-                    if value
-                    == selected_shift["guide_id"]
-                ),
-                list(
-                    guide_options.keys()
-                )[0]
+            interests = st.multiselect(
+                "Bạn thích gì?",
+                ["biển", "nghỉ dưỡng", "ẩm thực", "văn hóa",
+                 "lịch sử", "check-in", "thiên nhiên", "vui chơi"],
+                default=["ẩm thực"]
             )
 
-            with st.form(
-                "edit_shift_form"
-            ):
+            style = st.selectbox(
+                "Phong cách chuyến đi",
+                ["Nghỉ dưỡng", "Khám phá", "Check-in", "Ẩm thực"]
+            )
 
-                col1, col2 = st.columns(2)
+        submitted = st.form_submit_button(
+            "✨ Tạo đề xuất tour",
+            use_container_width=True
+        )
+
+    if submitted:
+        results = recommend_tours(days, budget, people, interests, style)
+
+        if destination != "Không giới hạn":
+            filtered = [
+                item for item in results
+                if item[1]["destination"] == destination
+            ]
+
+            # Nếu có kết quả đúng điểm đến thì ưu tiên
+            if filtered:
+                results = filtered + [
+                    item for item in results if item not in filtered
+                ]
+
+        st.session_state.custom_tour = results
+
+    if st.session_state.custom_tour:
+        st.divider()
+        st.subheader("🎯 Tour được đề xuất cho bạn")
+
+        for rank, (score, tour) in enumerate(st.session_state.custom_tour, start=1):
+            with st.container(border=True):
+                col1, col2 = st.columns([3, 1])
 
                 with col1:
-
-                    edit_guide_text = st.selectbox(
-                        "Hướng dẫn viên",
-                        list(
-                            guide_options.keys()
-                        ),
-                        index=list(
-                            guide_options.keys()
-                        ).index(
-                            current_guide_text
-                        )
+                    st.markdown(f"### {rank}. {tour['name']}")
+                    st.write(tour["description"])
+                    st.write(
+                        f"📅 {tour['days']} ngày {tour['nights']} đêm  | "
+                        f"🚐 {tour['transport']}  | "
+                        f"🎯 Độ phù hợp: **{min(score, 100)}%**"
                     )
+                    st.write("**Lịch trình:**")
+                    for item in tour["schedule"]:
+                        st.write("• " + item)
 
-                    edit_guide_id = guide_options[
-                        edit_guide_text
-                    ]
+                with col2:
+                    st.markdown(f"### {money(tour['price'])}")
+                    st.caption("Giá/người")
 
-                    edit_date = st.date_input(
-                        "Ngày",
-                        value=selected_shift[
-                            "shift_date"
-                        ]
-                    )
+                    if st.button(
+                        "Đặt tour này",
+                        key=f"ai_book_{tour['id']}",
+                        use_container_width=True
+                    ):
+                        st.session_state.selected_tour = tour["id"]
+                        st.session_state.page = "TOURS"
+                        st.rerun()
 
-                    edit_start = st.time_input(
-                        "Giờ bắt đầu",
-                        value=selected_shift[
-                            "start_time"
-                        ]
-                    )
 
-                    edit_end = st.time_input(
-                        "Giờ kết thúc",
-                        value=selected_shift[
-                            "end_time"
-                        ]
+# ============================================================
+# KHÁM PHÁ & ĐẶT TOUR
+# ============================================================
+elif st.session_state.page == "TOURS":
+    st.title("🗺️ Khám phá & đặt tour")
+
+    if st.session_state.selected_tour:
+        selected = find_tour_by_id(st.session_state.selected_tour)
+        st.success(f"Đang chọn: {selected['name']}")
+
+    filter_col1, filter_col2 = st.columns(2)
+
+    with filter_col1:
+        destination_filter = st.selectbox(
+            "Lọc theo điểm đến",
+            ["Tất cả"] + sorted(list(set(t["destination"] for t in TOURS)))
+        )
+
+    with filter_col2:
+        max_price = st.slider(
+            "Ngân sách tối đa / người",
+            1000000,
+            10000000,
+            6000000,
+            step=500000
+        )
+
+    filtered_tours = [
+        t for t in TOURS
+        if (destination_filter == "Tất cả" or t["destination"] == destination_filter)
+        and t["price"] <= max_price
+    ]
+
+    if not filtered_tours:
+        st.warning("Không có tour phù hợp với bộ lọc.")
+    else:
+        for tour in filtered_tours:
+            with st.container(border=True):
+                col1, col2 = st.columns([4, 1])
+
+                with col1:
+                    st.subheader(tour["name"])
+                    st.write(tour["description"])
+                    st.write(
+                        f"📅 {tour['days']} ngày {tour['nights']} đêm | "
+                        f"🏷️ {', '.join(tour['category'])}"
                     )
 
                 with col2:
+                    st.markdown(f"### {money(tour['price'])}")
+                    st.caption("/ người")
 
-                    edit_tour = st.text_input(
-                        "Tên tour",
-                        value=selected_shift[
-                            "tour_name"
-                        ]
-                    )
-
-                    edit_destination = st.text_input(
-                        "Điểm đến",
-                        value=selected_shift[
-                            "destination"
-                        ]
-                    )
-
-                    tour_type_options = [
-                        "Tour trong ngày",
-                        "Tour nhiều ngày",
-                        "City tour",
-                        "Tour tham quan",
-                        "Tour đoàn",
-                        "Tour học sinh",
-                        "Tour doanh nghiệp",
-                        "Khác"
-                    ]
-
-                    current_tour_type = (
-                        selected_shift[
-                            "tour_type"
-                        ]
-                    )
-
-                    tour_type_index = (
-                        tour_type_options.index(
-                            current_tour_type
-                        )
-                        if current_tour_type
-                        in tour_type_options
-                        else 0
-                    )
-
-                    edit_tour_type = st.selectbox(
-                        "Loại tour",
-                        tour_type_options,
-                        index=tour_type_index
-                    )
-
-                    edit_guest_count = (
-                        st.number_input(
-                            "Số khách",
-                            min_value=0,
-                            max_value=10000,
-                            value=int(
-                                selected_shift[
-                                    "guest_count"
-                                ]
-                            )
-                        )
-                    )
-
-                    edit_pickup = st.text_input(
-                        "Điểm đón",
-                        value=selected_shift[
-                            "pickup_location"
-                        ]
-                    )
-
-                    status_options = [
-                        "Đã xếp",
-                        "Đang thực hiện",
-                        "Hoàn thành",
-                        "Đã hủy"
-                    ]
-
-                    current_status = (
-                        selected_shift[
-                            "status"
-                        ]
-                    )
-
-                    status_index = (
-                        status_options.index(
-                            current_status
-                        )
-                        if current_status
-                        in status_options
-                        else 0
-                    )
-
-                    edit_status = st.selectbox(
-                        "Trạng thái",
-                        status_options,
-                        index=status_index
-                    )
-
-                edit_notes = st.text_area(
-                    "Ghi chú",
-                    value=selected_shift[
-                        "notes"
-                    ]
-                )
-
-                save_shift = st.form_submit_button(
-                    "💾 Lưu thay đổi",
-                    use_container_width=True
-                )
-
-                if save_shift:
-
-                    if not edit_tour.strip():
-
-                        st.error(
-                            "Tên tour không được để trống."
-                        )
-
-                    elif edit_end <= edit_start:
-
-                        st.error(
-                            "Giờ kết thúc phải lớn hơn "
-                            "giờ bắt đầu."
-                        )
-
-                    elif is_day_off(
-                        edit_guide_id,
-                        edit_date
+                    if st.button(
+                        "Chọn tour",
+                        key=f"select_{tour['id']}",
+                        use_container_width=True
                     ):
+                        st.session_state.selected_tour = tour["id"]
+                        st.rerun()
 
-                        st.error(
-                            "Hướng dẫn viên đã đăng ký "
-                            "nghỉ ngày này."
+                if st.session_state.selected_tour == tour["id"]:
+                    st.divider()
+                    st.write("### 📅 Lịch trình")
+                    for item in tour["schedule"]:
+                        st.write("• " + item)
+
+                    with st.form(f"booking_form_{tour['id']}"):
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            customer_name = st.text_input("Họ và tên")
+                            customer_phone = st.text_input("Số điện thoại")
+                            departure_date = st.date_input(
+                                "Ngày khởi hành",
+                                value=date.today() + timedelta(days=7),
+                                min_value=date.today() + timedelta(days=1)
+                            )
+
+                        with c2:
+                            customer_email = st.text_input("Email")
+                            number_people = st.number_input(
+                                "Số lượng khách",
+                                min_value=1,
+                                max_value=100,
+                                value=2
+                            )
+                            note = st.text_area("Yêu cầu đặc biệt")
+
+                        total = tour["price"] * number_people
+                        st.info(f"💰 Tổng tạm tính: **{money(total)}**")
+
+                        confirm = st.form_submit_button(
+                            "✅ Xác nhận đặt tour",
+                            use_container_width=True
                         )
 
-                    else:
-
-                        conflict = check_shift_conflict(
-                            edit_guide_id,
-                            edit_date,
-                            edit_start,
-                            edit_end,
-                            exclude_shift_id=(
-                                selected_shift_id
-                            )
-                        )
-
-                        if conflict:
-
-                            st.error(
-                                "❌ Ca mới bị trùng với ca khác."
-                            )
-
-                            st.warning(
-                                f"Tour trùng: "
-                                f"{conflict['tour_name']} | "
-                                f"{format_time(conflict['start_time'])}"
-                                f" - "
-                                f"{format_time(conflict['end_time'])}"
-                            )
-
+                    if confirm:
+                        if not customer_name.strip() or not customer_phone.strip():
+                            st.error("Vui lòng nhập họ tên và số điện thoại.")
                         else:
-
-                            selected_shift[
-                                "guide_id"
-                            ] = edit_guide_id
-
-                            selected_shift[
-                                "shift_date"
-                            ] = edit_date
-
-                            selected_shift[
-                                "start_time"
-                            ] = edit_start
-
-                            selected_shift[
-                                "end_time"
-                            ] = edit_end
-
-                            selected_shift[
-                                "tour_name"
-                            ] = edit_tour.strip()
-
-                            selected_shift[
-                                "destination"
-                            ] = edit_destination.strip()
-
-                            selected_shift[
-                                "tour_type"
-                            ] = edit_tour_type
-
-                            selected_shift[
-                                "guest_count"
-                            ] = edit_guest_count
-
-                            selected_shift[
-                                "pickup_location"
-                            ] = edit_pickup.strip()
-
-                            selected_shift[
-                                "status"
-                            ] = edit_status
-
-                            selected_shift[
-                                "notes"
-                            ] = edit_notes.strip()
-
+                            st.session_state.booking = {
+                                "code": "ST" + str(random.randint(100000, 999999)),
+                                "tour": tour["name"],
+                                "date": departure_date,
+                                "people": number_people,
+                                "name": customer_name,
+                                "phone": customer_phone,
+                                "email": customer_email,
+                                "note": note,
+                                "total": total,
+                                "status": "Đã xác nhận"
+                            }
                             st.success(
-                                "Đã cập nhật ca."
+                                f"Đặt tour thành công! Mã đặt tour: "
+                                f"**{st.session_state.booking['code']}**"
                             )
 
-                            st.rerun()
 
+# ============================================================
+# TÍNH NĂNG 2 — ĐỔI LỊCH TRÌNH THÔNG MINH
+# ============================================================
+elif st.session_state.page == "CHANGE":
+    st.title("🔄 Đổi lịch trình thông minh")
+    st.write(
+        "Mô phỏng tình huống tour bị ảnh hưởng bởi thời tiết, "
+        "đóng cửa điểm tham quan hoặc thay đổi điều kiện vận hành."
+    )
+
+    if not st.session_state.booking:
+        st.warning("Bạn chưa có đơn đặt tour. Hãy đặt một tour trước.")
+    else:
+        booking = st.session_state.booking
+        st.success(
+            f"Đơn **{booking['code']}** — {booking['tour']} — "
+            f"{booking['people']} khách"
+        )
+
+        reason = st.selectbox(
+            "Lý do cần thay đổi",
+            [
+                "🌧️ Thời tiết xấu",
+                "🚧 Điểm tham quan tạm đóng cửa",
+                "🚌 Phương tiện bị thay đổi",
+                "👥 Khách muốn thay đổi nhu cầu",
+                "⏰ Đoàn bị trễ thời gian"
+            ]
+        )
+
+        st.subheader("🤖 Phương án SmartTour đề xuất")
+
+        alternatives = {
+            "🌧️ Thời tiết xấu": [
+                ("Phương án A", "Thay hoạt động ngoài trời bằng bảo tàng + trải nghiệm ẩm thực.", "Giữ nguyên thời lượng"),
+                ("Phương án B", "Chuyển điểm tham quan ngoài trời sang hoạt động trong nhà.", "Giảm 1 hoạt động"),
+                ("Phương án C", "Dời hoạt động ngoài trời sang ngày tiếp theo.", "Điều chỉnh toàn bộ lịch trình")
+            ],
+            "🚧 Điểm tham quan tạm đóng cửa": [
+                ("Phương án A", "Thay bằng một điểm tham quan tương đương gần đó.", "Không phát sinh"),
+                ("Phương án B", "Tăng thời gian trải nghiệm tại điểm tiếp theo.", "Không đổi tuyến"),
+                ("Phương án C", "Điều chỉnh lịch trình theo điểm tham quan dự phòng.", "Có thay đổi thứ tự")
+            ],
+            "🚌 Phương tiện bị thay đổi": [
+                ("Phương án A", "Điều chuyển sang xe dự phòng cùng tiêu chuẩn.", "Ít ảnh hưởng"),
+                ("Phương án B", "Chia đoàn thành 2 xe nhỏ.", "Có thay đổi phương tiện"),
+                ("Phương án C", "Điều chỉnh giờ khởi hành.", "Thay đổi thời gian")
+            ],
+            "👥 Khách muốn thay đổi nhu cầu": [
+                ("Phương án A", "Bỏ một hoạt động và tăng thời gian tự do.", "Linh hoạt"),
+                ("Phương án B", "Thay hoạt động hiện tại bằng trải nghiệm phù hợp sở thích.", "Cá nhân hóa"),
+                ("Phương án C", "Giữ lịch trình chính, thêm hoạt động tự chọn.", "Có thể phát sinh phí")
+            ],
+            "⏰ Đoàn bị trễ thời gian": [
+                ("Phương án A", "Rút ngắn thời gian tại điểm hiện tại.", "Giữ toàn bộ lịch trình"),
+                ("Phương án B", "Bỏ một điểm ít ưu tiên.", "Giảm 1 điểm"),
+                ("Phương án C", "Điều chỉnh giờ ăn và thời gian tham quan.", "Tối ưu thời gian")
+            ]
+        }
+
+        selected_option = None
+
+        for title, desc, impact in alternatives[reason]:
+            with st.container(border=True):
+                c1, c2 = st.columns([4, 1])
+                with c1:
+                    st.markdown(f"### {title}")
+                    st.write(desc)
+                    st.caption("Ảnh hưởng: " + impact)
+                with c2:
+                    if st.button("Chọn", key=f"change_{title}"):
+                        selected_option = title
+                        st.session_state.change_result = {
+                            "reason": reason,
+                            "option": title,
+                            "description": desc
+                        }
+
+        if "change_result" in st.session_state:
+            result = st.session_state.change_result
             st.divider()
+            st.markdown(
+                f"""
+                <div class="success-box">
+                <h3>✅ Đã chọn phương án</h3>
+                <b>Lý do:</b> {result['reason']}<br>
+                <b>Phương án:</b> {result['option']}<br>
+                <b>Xử lý:</b> {result['description']}<br><br>
+                📢 Hệ thống có thể gửi thông báo mới cho khách, HDV và tài xế.
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
-            if st.button(
-                "🗑️ Xóa ca này",
-                type="secondary"
-            ):
 
-                st.session_state.shifts = [
-                    shift
-                    for shift
-                    in st.session_state.shifts
-                    if shift["id"]
-                    != selected_shift_id
+# ============================================================
+# TÍNH NĂNG 5 — TRỢ LÝ XỬ LÝ SỰ CỐ
+# ============================================================
+elif st.session_state.page == "INCIDENT":
+    st.title("🚨 Trợ lý xử lý sự cố du lịch")
+    st.write(
+        "Khách chọn vấn đề đang gặp phải. Hệ thống đưa ra hướng xử lý "
+        "ban đầu và xác định người cần được thông báo."
+    )
+
+    incident = st.selectbox(
+        "Bạn đang gặp vấn đề gì?",
+        [
+            "🚌 Trễ xe / không thấy xe đón",
+            "📍 Lạc đoàn",
+            "🎒 Thất lạc hành lý / đồ cá nhân",
+            "🏨 Vấn đề phòng khách sạn",
+            "🌧️ Thời tiết ảnh hưởng lịch trình",
+            "📞 Không liên hệ được với HDV",
+            "🆘 Tình huống khẩn cấp"
+        ]
+    )
+
+    detail = st.text_area(
+        "Mô tả thêm tình huống",
+        placeholder="Ví dụ: Tôi đang ở sảnh khách sạn nhưng chưa thấy xe..."
+    )
+
+    if st.button("🚨 Gửi yêu cầu hỗ trợ", use_container_width=True):
+        responses = {
+            "🚌 Trễ xe / không thấy xe đón": {
+                "level": "Cần điều hành kiểm tra ngay",
+                "action": [
+                    "Kiểm tra vị trí xe và thời gian đón.",
+                    "Liên hệ tài xế/HDV.",
+                    "Gửi vị trí hiện tại của khách cho điều hành.",
+                    "Thông báo thời gian đón dự kiến cho khách."
                 ]
+            },
+            "📍 Lạc đoàn": {
+                "level": "Ưu tiên cao",
+                "action": [
+                    "Khách ở nguyên vị trí an toàn nếu có thể.",
+                    "Gửi vị trí hiện tại.",
+                    "Liên hệ HDV và điều hành.",
+                    "Không tự ý di chuyển đến địa điểm khác khi chưa được hướng dẫn."
+                ]
+            },
+            "🎒 Thất lạc hành lý / đồ cá nhân": {
+                "level": "Cần hỗ trợ",
+                "action": [
+                    "Xác định địa điểm cuối cùng nhìn thấy đồ.",
+                    "Thông báo cho HDV.",
+                    "Liên hệ địa điểm/nhà hàng/khách sạn liên quan.",
+                    "Ghi nhận thông tin tài sản thất lạc."
+                ]
+            },
+            "🏨 Vấn đề phòng khách sạn": {
+                "level": "Điều hành/HDV hỗ trợ",
+                "action": [
+                    "Ghi nhận tình trạng phòng.",
+                    "Liên hệ lễ tân.",
+                    "Yêu cầu phương án khắc phục hoặc đổi phòng nếu cần.",
+                    "Cập nhật kết quả cho khách."
+                ]
+            },
+            "🌧️ Thời tiết ảnh hưởng lịch trình": {
+                "level": "Điều hành cần đánh giá",
+                "action": [
+                    "Kiểm tra điều kiện thời tiết.",
+                    "Đánh giá các hoạt động bị ảnh hưởng.",
+                    "Đề xuất điểm thay thế.",
+                    "Cập nhật lịch trình cho toàn đoàn."
+                ]
+            },
+            "📞 Không liên hệ được với HDV": {
+                "level": "Cần điều hành kiểm tra",
+                "action": [
+                    "Kiểm tra trạng thái HDV.",
+                    "Liên hệ qua kênh dự phòng.",
+                    "Điều hành liên hệ trưởng đoàn/khách.",
+                    "Bố trí nhân sự hỗ trợ nếu cần."
+                ]
+            },
+            "🆘 Tình huống khẩn cấp": {
+                "level": "KHẨN CẤP",
+                "action": [
+                    "Ưu tiên đảm bảo an toàn cho người gặp nạn.",
+                    "Liên hệ dịch vụ khẩn cấp phù hợp tại địa phương.",
+                    "Thông báo ngay cho HDV và điều hành.",
+                    "Cung cấp vị trí và thông tin cần thiết."
+                ]
+            }
+        }
 
-                st.success(
-                    "Đã xóa ca."
-                )
+        result = responses[incident]
+        st.session_state.incident_result = result
 
-                st.rerun()
+    if st.session_state.incident_result:
+        result = st.session_state.incident_result
+
+        st.divider()
+        st.markdown(
+            f"""
+            <div class="incident-box">
+            <h3>🚨 Mức độ: {result['level']}</h3>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        st.subheader("🛠️ Hướng xử lý đề xuất")
+        for action in result["action"]:
+            st.write("✅ " + action)
+
+        if detail:
+            st.info(f"Thông tin khách cung cấp: {detail}")
+
+        st.success(
+            "Yêu cầu đã được ghi nhận. Trong phiên bản triển khai thực tế, "
+            "hệ thống có thể gửi thông báo trực tiếp đến điều hành và HDV."
+        )
+
+
+# ============================================================
+# ĐƠN ĐẶT TOUR
+# ============================================================
+elif st.session_state.page == "BOOKING":
+    st.title("📋 Đơn đặt tour")
+
+    if not st.session_state.booking:
+        st.info("Bạn chưa có đơn đặt tour nào trong phiên làm việc này.")
+        st.button(
+            "🗺️ Đi đặt tour",
+            on_click=lambda: st.session_state.update(page="TOURS")
+        )
+    else:
+        booking = st.session_state.booking
+
+        st.markdown(
+            f"""
+            <div class="success-box">
+            <h3>✅ Đặt tour thành công</h3>
+            <b>Mã đặt tour:</b> {booking['code']}<br>
+            <b>Tour:</b> {booking['tour']}<br>
+            <b>Khách hàng:</b> {booking['name']}<br>
+            <b>Ngày khởi hành:</b> {booking['date'].strftime('%d/%m/%Y')}<br>
+            <b>Số khách:</b> {booking['people']}<br>
+            <b>Tổng tiền:</b> {money(booking['total'])}<br>
+            <b>Trạng thái:</b> {booking['status']}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        st.write("")
+        st.subheader("💡 Sau khi đặt tour")
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            st.info("🔄 **Đổi lịch**\n\nXử lý khi tour có thay đổi.")
+
+        with c2:
+            st.warning("🚨 **Báo sự cố**\n\nGửi yêu cầu hỗ trợ cho điều hành.")
+
+        with c3:
+            st.success("📱 **Thông báo**\n\nPhiên bản thực tế có thể gửi thông báo realtime.")
+
+# Footer
+st.divider()
+st.caption(
+    "SmartTour Demo • Streamlit • Phiên bản không kết nối cơ sở dữ liệu/API • "
+    "Có thể mở rộng MySQL, AI API, bản đồ và thanh toán."
+)
