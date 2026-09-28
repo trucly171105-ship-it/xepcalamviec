@@ -23,7 +23,7 @@ if "lich_trinh_list" not in st.session_state:
     st.session_state.lich_trinh_list = []
 
 if "phân_ca" not in st.session_state:
-    st.session_state.phân_ca = pd.DataFrame(columns=["Ngày", "Hướng dẫn viên", "Chuyên môn", "Tour", "Loại tour", "Chi tiết"])
+    st.session_state.phân_ca = pd.DataFrame(columns=["Ngày", "Hướng dẫn viên", "Chuyên môn", "Tour", "Loại tour"])
 
 # Hàm tiện ích
 def lay_danh_sach_ngay(tuan=None):
@@ -66,11 +66,9 @@ def lay_lich_nhac_nho(hdv_ten):
         (pd.to_datetime(st.session_state.phân_ca["Ngày"], format="%d/%m/%Y").dt.date >= ngay_hien_tai) &
         (pd.to_datetime(st.session_state.phân_ca["Ngày"], format="%d/%m/%Y").dt.date <= ngay_hien_tai + timedelta(days=7))
     ]
-    return lich[["Ngày", "Tour", "Chi tiết"]].values.tolist()
+    return lich[["Ngày", "Tour"]].values.tolist()
 
-# --- Cải thiện giao diện các tab ---
-
-# Sidebar
+# Sidebar quản lý dữ liệu
 with st.sidebar:
     st.header("⚙️ Quản lý dữ liệu")
 
@@ -110,46 +108,20 @@ with tab1:
     st.dataframe(df_hdv[["ten", "chuyen_mon", "so_ngay_nghi", "ngay_nghi"]], use_container_width=True, hide_index=True)
 
 with tab2:
-    st.subheader("Chi tiết các lịch tour")
-    # Hiển thị thông tin chi tiết hơn về các tour
+    st.subheader("Danh sách lịch tour")
     if not st.session_state.lich_trinh_list:
-        st.info("Chưa có lịch tour nào được thêm. Vui lòng thêm tour ở mục 'Thêm lịch tour mới' trong Sidebar.")
+        st.info("Chưa có lịch tour nào")
     else:
-        # Thêm form để người dùng nhập thông tin tour
-        with st.form("form_them_lich_tour", clear_on_submit=True):
-            ten_tour = st.text_input("Tên tour")
-            ngay_khoi_hanh = st.date_input("Ngày khởi hành")
-            loai_tour = st.selectbox("Loại tour", ["Trong nước", "Quốc tế", "Trekking", "Đường dài"])
-            so_luong_hdv_can = st.number_input("Số lượng HDV cần phân", min_value=1, value=1)
-            mo_ta_tour = st.text_area("Mô tả chi tiết tour (điểm đến, hoạt động chính, yêu cầu đặc biệt...)")
-            submitted = st.form_submit_button("Thêm tour vào danh sách")
-            if submitted:
-                new_id = max([x["id"] for x in st.session_state.lich_trinh_list], default=0) + 1
-                st.session_state.lich_trinh_list.append({
-                    "id": new_id,
-                    "ten_tour": ten_tour,
-                    "ngay_khoi_hanh": ngay_khoi_hanh,
-                    "loai_tour": loai_tour,
-                    "so_luong_hdv_can": so_luong_hdv_can,
-                    "mo_ta_tour": mo_ta_tour,
-                    "hdv_phan_ca": [] # Khởi tạo danh sách HDV đã phân ca cho tour này
-                })
-                st.success(f"Đã thêm tour '{ten_tour}' thành công!")
-
-        st.subheader("Danh sách các tour đã thêm")
         df_tour = pd.DataFrame(st.session_state.lich_trinh_list)
         df_tour["ngay_khoi_hanh"] = df_tour["ngay_khoi_hanh"].apply(lambda x: x.strftime("%d/%m/%Y"))
-        # Hiển thị chi tiết hơn
-        st.dataframe(df_tour[["ten_tour", "ngay_khoi_hanh", "loai_tour", "so_luong_hdv_can", "mo_ta_tour"]], use_container_width=True, hide_index=True)
+        st.dataframe(df_tour[["ten_tour", "ngay_khoi_hanh", "loai_tour", "so_luong_hdv_can"]], use_container_width=True, hide_index=True)
 
 with tab3:
-    st.subheader("Quản lý xếp ca")
-    # Phần xếp ca tự động
-    st.markdown("### Xếp ca tự động")
-    tuan_chon = st.selectbox("Chọn tuần để xếp ca", [f"Tuần {i}" for i in range(1, 6)])
+    st.subheader("Xếp ca tự động & thủ công")
+    tuan_chon = st.selectbox("Chọn tuần", [f"Tuần {i}" for i in range(1,6)])
     ngay_trong_tuan = lay_danh_sach_ngay(int(tuan_chon.split()[-1]))
 
-    if st.button("Bắt đầu xếp ca tự động", type="primary"):
+    if st.button("Bắt đầu xếp ca", type="primary"):
         ds_phân_ca_moi = []
         xung_dot = []
         for tour in st.session_state.lich_trinh_list:
@@ -166,15 +138,14 @@ with tab3:
                 if hdv_phu_hop:
                     hdv_chon = hdv_phu_hop.pop(0)
                     if kiem_tra_xung_dot(hdv_chon["ten"], ngay_tour):
-                        xung_dot.append(f"HDV {hdv_chon['ten']} trùng lịch với tour khác vào ngày {ngay_tour.strftime('%d/%m/%Y')}")
+                        xung_dot.append(f"HDV {hdv_chon['ten']} trùng lịch tour {tour['ten_tour']} ngày {ngay_tour.strftime('%d/%m/%Y')}")
                     else:
                         ds_phân_ca_moi.append({
                             "Ngày": ngay_tour.strftime("%d/%m/%Y"),
                             "Hướng dẫn viên": hdv_chon["ten"],
                             "Chuyên môn": hdv_chon["chuyen_mon"],
                             "Tour": tour["ten_tour"],
-                            "Loại tour": tour["loai_tour"],
-                            "Chi tiết": tour["mo_ta_tour"] # Thêm mô tả tour vào chi tiết phân ca
+                            "Loại tour": tour["loai_tour"]
                         })
 
         if ds_phân_ca_moi:
@@ -182,89 +153,64 @@ with tab3:
                 st.session_state.phân_ca = pd.DataFrame(ds_phân_ca_moi)
             else:
                 st.session_state.phân_ca = pd.concat([st.session_state.phân_ca, pd.DataFrame(ds_phân_ca_moi)], ignore_index=True)
-            st.success(f"Đã phân công tự động {len(ds_phân_ca_moi)} lượt cho tuần {tuan_chon}.")
+            st.success(f"Đã phân công {len(ds_phân_ca_moi)} lượt")
             if xung_dot:
-                st.warning("⚠️ Có các xung đột lịch đã được phát hiện:")
+                st.warning("⚠️ Có các xung đột lịch:")
                 for thong_bao in xung_dot:
                     st.write(f"- {thong_bao}")
-        else:
-            st.warning("Không có tour nào trong tuần này hoặc không đủ HDV phù hợp để phân công.")
 
-    # Phần xếp ca thủ công
-    st.markdown("---") # Đường kẻ ngăn cách
-    st.subheader("Xếp ca thủ công")
-    col1, col2, col3, col4 = st.columns(4)
+    st.subheader("Phân ca thủ công")
+    col1, col2, col3 = st.columns(3)
     with col1:
-        hdv_list_ten = [x["ten"] for x in st.session_state.hdv_list]
-        hdv_chon_thu_cong = st.selectbox("Chọn HDV", hdv_list_ten if hdv_list_ten else ["Chưa có HDV"])
+        hdv_list = [x["ten"] for x in st.session_state.hdv_list]
+        hdv_chon = st.selectbox("Chọn HDV", hdv_list if hdv_list else ["Chưa có HDV"])
     with col2:
-        ngay_chon_thu_cong = st.date_input("Chọn ngày")
+        ngay_chon = st.date_input("Chọn ngày")
     with col3:
-        tour_list_ten = [x["ten_tour"] for x in st.session_state.lich_trinh_list]
-        tour_chon_thu_cong = st.selectbox("Chọn tour", tour_list_ten if tour_list_ten else ["Chưa có tour"])
-    with col4:
-        # Thêm ô nhập mô tả chi tiết cho ca thủ công
-        chi_tiet_ca_thu_cong = st.text_input("Chi tiết công việc", placeholder="Ví dụ: Hỗ trợ HDV chính...")
+        tour_list = [x["ten_tour"] for x in st.session_state.lich_trinh_list]
+        tour_chon = st.selectbox("Chọn tour", tour_list if tour_list else ["Chưa có tour"])
 
     if st.button("Lưu phân công thủ công", type="secondary"):
-        if kiem_tra_xung_dot(hdv_chon_thu_cong, ngay_chon_thu_cong):
+        if kiem_tra_xung_dot(hdv_chon, ngay_chon):
             st.error("⚠️ HDV này đã được phân công ca khác vào ngày này!")
         else:
-            hdv_info = next(x for x in st.session_state.hdv_list if x["ten"] == hdv_chon_thu_cong)
-            tour_info = next(x for x in st.session_state.lich_trinh_list if x["ten_tour"] == tour_chon_thu_cong)
+            hdv_info = next(x for x in st.session_state.hdv_list if x["ten"] == hdv_chon)
+            tour_info = next(x for x in st.session_state.lich_trinh_list if x["ten_tour"] == tour_chon)
             new_row = pd.DataFrame([{
-                "Ngày": ngay_chon_thu_cong.strftime("%d/%m/%Y"),
-                "Hướng dẫn viên": hdv_chon_thu_cong,
+                "Ngày": ngay_chon.strftime("%d/%m/%Y"),
+                "Hướng dẫn viên": hdv_chon,
                 "Chuyên môn": hdv_info["chuyen_mon"],
-                "Tour": tour_chon_thu_cong,
-                "Loại tour": tour_info["loai_tour"],
-                "Chi tiết": chi_tiet_ca_thu_cong if chi_tiet_ca_thu_cong else "Chưa có chi tiết" # Thêm chi tiết
+                "Tour": tour_chon,
+                "Loại tour": tour_info["loai_tour"]
             }])
             st.session_state.phân_ca = pd.concat([st.session_state.phân_ca, new_row], ignore_index=True)
-            st.success("Đã lưu phân công thủ công thành công!")
+            st.success("Đã lưu phân công thủ công")
 
 with tab4:
-    st.subheader("Thống kê và cân bằng công việc")
+    st.subheader("Thống kê cân bằng công việc")
     thong_ke = tinh_thong_ke_can_bang()
-    if st.session_state.phân_ca.empty:
-        st.info("Chưa có dữ liệu phân ca để thống kê. Hãy thực hiện xếp ca để xem thông tin.")
+    if thong_ke.empty:
+        st.info("Chưa có dữ liệu phân ca để thống kê")
     else:
-        st.markdown("### Khối lượng công việc của Hướng dẫn viên")
         st.dataframe(thong_ke, use_container_width=True, hide_index=True)
-
-        # Biểu đồ thống kê
-        fig = px.bar(
-            thong_ke,
-            x="Hướng dẫn viên",
-            y="Số tour đã làm",
-            color="Chênh lệch so với trung bình",
-            title="So sánh khối lượng công việc của Hướng dẫn viên",
-            text="Số tour đã làm",
-            labels={"Số tour đã làm": "Số tour đã thực hiện", "Chênh lệch so với trung bình": "So với trung bình"}
-        )
-        fig.update_layout(xaxis_title="Hướng dẫn viên", yaxis_title="Số tour đã thực hiện")
+        fig = px.bar(thong_ke, x="Hướng dẫn viên", y="Số tour đã làm", color="Chênh lệch so với trung bình",
+                    title="Số tour của mỗi HDV so với trung bình", text="Số tour đã làm")
         st.plotly_chart(fig, use_container_width=True)
-
-        st.markdown("### Tổng quan lịch sử phân ca")
-        st.dataframe(st.session_state.phân_ca[["Ngày", "Hướng dẫn viên", "Tour", "Chi tiết"]], use_container_width=True, hide_index=True) # Hiển thị thêm cột "Chi tiết"
 
 with tab5:
     st.subheader("Lịch nhắc nhở tour sắp tới")
-    hdv_nhac_ten = st.selectbox("Chọn hướng dẫn viên để xem lịch nhắc nhở", [x["ten"] for x in st.session_state.hdv_list])
-    lich = lay_lich_nhac_nho(hdv_nhac_ten)
+    hdv_nhac = st.selectbox("Chọn hướng dẫn viên để xem lịch nhắc nhở", [x["ten"] for x in st.session_state.hdv_list])
+    lich = lay_lich_nhac_nho(hdv_nhac)
     if not lich:
-        st.info(f"Không có tour nào sắp tới trong 7 ngày tới cho {hdv_nhac_ten}.")
+        st.info(f"Không có tour nào sắp tới trong 7 ngày tới cho {hdv_nhac}")
     else:
-        st.success(f"Lịch tour sắp tới của {hdv_nhac_ten} (trong 7 ngày):")
-        # Hiển thị chi tiết hơn
-        df_nhac_nho = pd.DataFrame(lich, columns=["Ngày", "Tour", "Chi tiết"])
-        st.dataframe(df_nhac_nho, use_container_width=True, hide_index=True)
+        st.success(f"Lịch tour sắp tới của {hdv_nhac}:")
+        for ngay, tour in lich:
+            st.write(f"- Ngày {ngay}: Tour {tour}")
 
-    # Nút tải file CSV
     if not st.session_state.phân_ca.empty:
         @st.cache_data
         def convert_df(df):
             return df.to_csv(index=False).encode('utf-8')
         csv = convert_df(st.session_state.phân_ca)
-        st.download_button(label="📥 Tải toàn bộ lịch phân ca về file CSV", data=csv, file_name="lich_phan_ca_day_du.csv", mime='text/csv')
-
+        st.download_button(label="📥 Tải lịch phân ca CSV", data=csv, file_name="lich_phan_ca.csv", mime='text/csv')
