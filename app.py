@@ -3,6 +3,8 @@ import pandas as pd
 from datetime import datetime, date, time, timedelta
 import io
 import uuid
+import pymysql
+from pymysql.cursors import DictCursor
 
 # ============================================================
 # CẤU HÌNH TRANG
@@ -14,6 +16,18 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# ============================================================
+# THÔNG TIN MYSQL AIVEN
+# ============================================================
+
+DB_HOST = "mysql-d660cbf-trucly171105-b953.k.aivencloud.com"
+DB_PORT = 27221
+DB_USER = "avnadmin"
+DB_PASSWORD = "AVNS_cyQyD8Ez8n3Ggy-ax8l"
+
+# Aiven MySQL thường có database mặc định là defaultdb
+DB_NAME = "defaultdb"
 
 # ============================================================
 # CSS
@@ -30,13 +44,6 @@ st.markdown("""
     .sub-title {
         color: #666;
         margin-bottom: 25px;
-    }
-
-    .metric-card {
-        padding: 18px;
-        border-radius: 12px;
-        border: 1px solid #ddd;
-        background: white;
     }
 
     .warning-box {
@@ -68,140 +75,566 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ============================================================
-# KHỞI TẠO DỮ LIỆU
-# ============================================================
-
-def init_data():
-    if "guides" not in st.session_state:
-        st.session_state.guides = pd.DataFrame([
-            {
-                "id": "HDV001",
-                "name": "Nguyễn Văn An",
-                "phone": "0901000001",
-                "languages": "Tiếng Việt, English",
-                "areas": "Vũng Tàu, TP.HCM",
-                "specialty": "Biển đảo",
-                "rating": 4.8,
-                "max_shifts": 5,
-                "status": "Sẵn sàng"
-            },
-            {
-                "id": "HDV002",
-                "name": "Trần Minh Anh",
-                "phone": "0901000002",
-                "languages": "Tiếng Việt, Trung",
-                "areas": "Vũng Tàu, Phú Quốc",
-                "specialty": "Nghỉ dưỡng",
-                "rating": 4.7,
-                "max_shifts": 4,
-                "status": "Sẵn sàng"
-            },
-            {
-                "id": "HDV003",
-                "name": "Lê Hoàng Nam",
-                "phone": "0901000003",
-                "languages": "Tiếng Việt, English, Korean",
-                "areas": "Đà Lạt, TP.HCM",
-                "specialty": "MICE",
-                "rating": 4.9,
-                "max_shifts": 6,
-                "status": "Sẵn sàng"
-            },
-            {
-                "id": "HDV004",
-                "name": "Phạm Thu Hà",
-                "phone": "0901000004",
-                "languages": "Tiếng Việt, English",
-                "areas": "Phú Quốc, Vũng Tàu",
-                "specialty": "Gia đình",
-                "rating": 4.6,
-                "max_shifts": 5,
-                "status": "Sẵn sàng"
-            },
-        ])
-
-    if "tours" not in st.session_state:
-        st.session_state.tours = pd.DataFrame([
-            {
-                "id": "TOUR001",
-                "tour_name": "Vũng Tàu 1 ngày",
-                "date": date.today(),
-                "start": time(7, 30),
-                "end": time(17, 0),
-                "location": "Vũng Tàu",
-                "tour_type": "Biển đảo",
-                "language": "Tiếng Việt",
-                "guests": 30,
-                "priority": "Bình thường",
-                "guide": "",
-                "status": "Chưa phân"
-            },
-            {
-                "id": "TOUR002",
-                "tour_name": "Phú Quốc 3N2Đ",
-                "date": date.today() + timedelta(days=1),
-                "start": time(8, 0),
-                "end": time(18, 0),
-                "location": "Phú Quốc",
-                "tour_type": "Nghỉ dưỡng",
-                "language": "Tiếng Việt",
-                "guests": 20,
-                "priority": "Cao",
-                "guide": "",
-                "status": "Chưa phân"
-            }
-        ])
-
-    if "notifications" not in st.session_state:
-        st.session_state.notifications = []
-
-    if "availability" not in st.session_state:
-        st.session_state.availability = {}
-
-
-init_data()
 
 # ============================================================
-# HÀM TIỆN ÍCH
+# KẾT NỐI DATABASE
 # ============================================================
 
-def save_notification(message, level="info"):
-    st.session_state.notifications.insert(
-        0,
-        {
-            "time": datetime.now().strftime("%d/%m/%Y %H:%M"),
-            "message": message,
-            "level": level
+@st.cache_resource
+def get_connection():
+    """
+    Tạo kết nối MySQL Aiven.
+    SSL được bật để kết nối an toàn.
+    """
+
+    return pymysql.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        database=DB_NAME,
+        charset="utf8mb4",
+        cursorclass=DictCursor,
+        autocommit=True,
+
+        # SSL/TLS
+        ssl={
+            "ssl": {}
         }
     )
 
 
+def test_database_connection():
+    try:
+        conn = get_connection()
+
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT 1 AS test")
+            cursor.fetchone()
+
+        return True, "Kết nối MySQL Aiven thành công."
+
+    except Exception as e:
+        return False, str(e)
+
+
+# ============================================================
+# TẠO TABLE
+# ============================================================
+
+def create_tables():
+
+    conn = get_connection()
+
+    with conn.cursor() as cursor:
+
+        # ----------------------------------------------------
+        # BẢNG HDV
+        # ----------------------------------------------------
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS guides (
+                id VARCHAR(50) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                phone VARCHAR(50),
+                languages TEXT,
+                areas TEXT,
+                specialty VARCHAR(255),
+                rating DECIMAL(3,2) DEFAULT 0,
+                max_shifts INT DEFAULT 5,
+                status VARCHAR(50) DEFAULT 'Sẵn sàng',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            CHARACTER SET utf8mb4
+            COLLATE utf8mb4_unicode_ci
+        """)
+
+        # ----------------------------------------------------
+        # BẢNG TOUR
+        # ----------------------------------------------------
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS tours (
+                id VARCHAR(50) PRIMARY KEY,
+                tour_name VARCHAR(255) NOT NULL,
+                tour_date DATE NOT NULL,
+                start_time TIME NOT NULL,
+                end_time TIME NOT NULL,
+                location VARCHAR(255),
+                tour_type VARCHAR(255),
+                language VARCHAR(100),
+                guests INT DEFAULT 1,
+                priority VARCHAR(50) DEFAULT 'Bình thường',
+                guide VARCHAR(255) DEFAULT '',
+                status VARCHAR(50) DEFAULT 'Chưa phân',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            CHARACTER SET utf8mb4
+            COLLATE utf8mb4_unicode_ci
+        """)
+
+        # ----------------------------------------------------
+        # BẢNG THÔNG BÁO
+        # ----------------------------------------------------
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                message TEXT NOT NULL,
+                level VARCHAR(50) DEFAULT 'info',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            CHARACTER SET utf8mb4
+            COLLATE utf8mb4_unicode_ci
+        """)
+
+    conn.commit()
+
+
+# ============================================================
+# KHỞI TẠO DATABASE
+# ============================================================
+
+def initialize_database():
+
+    try:
+
+        create_tables()
+
+        conn = get_connection()
+
+        with conn.cursor() as cursor:
+
+            # ------------------------------------------------
+            # KIỂM TRA HDV
+            # ------------------------------------------------
+
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM guides"
+            )
+
+            guide_count = cursor.fetchone()["total"]
+
+            if guide_count == 0:
+
+                sample_guides = [
+                    (
+                        "HDV001",
+                        "Nguyễn Văn An",
+                        "0901000001",
+                        "Tiếng Việt, English",
+                        "Vũng Tàu, TP.HCM",
+                        "Biển đảo",
+                        4.8,
+                        5,
+                        "Sẵn sàng"
+                    ),
+                    (
+                        "HDV002",
+                        "Trần Minh Anh",
+                        "0901000002",
+                        "Tiếng Việt, Trung",
+                        "Vũng Tàu, Phú Quốc",
+                        "Nghỉ dưỡng",
+                        4.7,
+                        4,
+                        "Sẵn sàng"
+                    ),
+                    (
+                        "HDV003",
+                        "Lê Hoàng Nam",
+                        "0901000003",
+                        "Tiếng Việt, English, Korean",
+                        "Đà Lạt, TP.HCM",
+                        "MICE",
+                        4.9,
+                        6,
+                        "Sẵn sàng"
+                    ),
+                    (
+                        "HDV004",
+                        "Phạm Thu Hà",
+                        "0901000004",
+                        "Tiếng Việt, English",
+                        "Phú Quốc, Vũng Tàu",
+                        "Gia đình",
+                        4.6,
+                        5,
+                        "Sẵn sàng"
+                    )
+                ]
+
+                cursor.executemany("""
+                    INSERT INTO guides
+                    (
+                        id,
+                        name,
+                        phone,
+                        languages,
+                        areas,
+                        specialty,
+                        rating,
+                        max_shifts,
+                        status
+                    )
+                    VALUES
+                    (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, sample_guides)
+
+            # ------------------------------------------------
+            # KIỂM TRA TOUR
+            # ------------------------------------------------
+
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM tours"
+            )
+
+            tour_count = cursor.fetchone()["total"]
+
+            if tour_count == 0:
+
+                today = date.today()
+
+                sample_tours = [
+                    (
+                        "TOUR001",
+                        "Vũng Tàu 1 ngày",
+                        today,
+                        time(7, 30),
+                        time(17, 0),
+                        "Vũng Tàu",
+                        "Biển đảo",
+                        "Tiếng Việt",
+                        30,
+                        "Bình thường",
+                        "",
+                        "Chưa phân"
+                    ),
+                    (
+                        "TOUR002",
+                        "Phú Quốc 3N2Đ",
+                        today + timedelta(days=1),
+                        time(8, 0),
+                        time(18, 0),
+                        "Phú Quốc",
+                        "Nghỉ dưỡng",
+                        "Tiếng Việt",
+                        20,
+                        "Cao",
+                        "",
+                        "Chưa phân"
+                    )
+                ]
+
+                cursor.executemany("""
+                    INSERT INTO tours
+                    (
+                        id,
+                        tour_name,
+                        tour_date,
+                        start_time,
+                        end_time,
+                        location,
+                        tour_type,
+                        language,
+                        guests,
+                        priority,
+                        guide,
+                        status
+                    )
+                    VALUES
+                    (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, sample_tours)
+
+        conn.commit()
+
+    except Exception as e:
+        st.error(
+            f"❌ Không thể khởi tạo database: {e}"
+        )
+        st.stop()
+
+
+# ============================================================
+# LOAD DATA
+# ============================================================
+
+def load_guides():
+
+    conn = get_connection()
+
+    query = """
+        SELECT
+            id,
+            name,
+            phone,
+            languages,
+            areas,
+            specialty,
+            rating,
+            max_shifts,
+            status
+        FROM guides
+        ORDER BY name
+    """
+
+    return pd.read_sql(query, conn)
+
+
+def load_tours():
+
+    conn = get_connection()
+
+    query = """
+        SELECT
+            id,
+            tour_name,
+            tour_date AS date,
+            start_time AS start,
+            end_time AS end,
+            location,
+            tour_type,
+            language,
+            guests,
+            priority,
+            guide,
+            status
+        FROM tours
+        ORDER BY tour_date, start_time
+    """
+
+    df = pd.read_sql(query, conn)
+
+    if not df.empty:
+
+        df["date"] = pd.to_datetime(
+            df["date"]
+        ).dt.date
+
+        df["start"] = pd.to_datetime(
+            df["start"].astype(str)
+        ).dt.time
+
+        df["end"] = pd.to_datetime(
+            df["end"].astype(str)
+        ).dt.time
+
+    return df
+
+
+# ============================================================
+# LƯU HDV
+# ============================================================
+
+def add_guide(
+    guide_id,
+    name,
+    phone,
+    languages,
+    areas,
+    specialty,
+    rating,
+    max_shifts
+):
+
+    conn = get_connection()
+
+    with conn.cursor() as cursor:
+
+        cursor.execute("""
+            INSERT INTO guides
+            (
+                id,
+                name,
+                phone,
+                languages,
+                areas,
+                specialty,
+                rating,
+                max_shifts,
+                status
+            )
+            VALUES
+            (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            guide_id,
+            name,
+            phone,
+            languages,
+            areas,
+            specialty,
+            rating,
+            max_shifts,
+            "Sẵn sàng"
+        ))
+
+    conn.commit()
+
+
+# ============================================================
+# XÓA HDV
+# ============================================================
+
+def delete_guide(name):
+
+    conn = get_connection()
+
+    with conn.cursor() as cursor:
+
+        cursor.execute(
+            "DELETE FROM guides WHERE name = %s",
+            (name,)
+        )
+
+    conn.commit()
+
+
+# ============================================================
+# THÊM TOUR
+# ============================================================
+
+def add_tour(
+    tour_id,
+    tour_name,
+    tour_date,
+    start_time,
+    end_time,
+    location,
+    tour_type,
+    language,
+    guests,
+    priority
+):
+
+    conn = get_connection()
+
+    with conn.cursor() as cursor:
+
+        cursor.execute("""
+            INSERT INTO tours
+            (
+                id,
+                tour_name,
+                tour_date,
+                start_time,
+                end_time,
+                location,
+                tour_type,
+                language,
+                guests,
+                priority,
+                guide,
+                status
+            )
+            VALUES
+            (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            tour_id,
+            tour_name,
+            tour_date,
+            start_time,
+            end_time,
+            location,
+            tour_type,
+            language,
+            guests,
+            priority,
+            "",
+            "Chưa phân"
+        ))
+
+    conn.commit()
+
+
+# ============================================================
+# CẬP NHẬT PHÂN CA
+# ============================================================
+
+def update_tour_assignment(
+    tour_id,
+    guide,
+    status
+):
+
+    conn = get_connection()
+
+    with conn.cursor() as cursor:
+
+        cursor.execute("""
+            UPDATE tours
+            SET
+                guide = %s,
+                status = %s
+            WHERE id = %s
+        """, (
+            guide,
+            status,
+            tour_id
+        ))
+
+    conn.commit()
+
+
+# ============================================================
+# ĐẾM SỐ CA HDV
+# ============================================================
+
 def get_shift_count(guide_name):
-    tours = st.session_state.tours
-    if tours.empty:
-        return 0
 
-    return len(
-        tours[
-            (tours["guide"] == guide_name) &
-            (tours["status"] == "Đã phân")
-        ]
-    )
+    conn = get_connection()
 
+    with conn.cursor() as cursor:
+
+        cursor.execute("""
+            SELECT COUNT(*) AS total
+            FROM tours
+            WHERE guide = %s
+            AND status = 'Đã phân'
+        """, (guide_name,))
+
+        result = cursor.fetchone()
+
+    return result["total"]
+
+
+# ============================================================
+# LẤY TOUR CỦA HDV
+# ============================================================
 
 def get_guide_tours(guide_name):
-    return st.session_state.tours[
-        st.session_state.tours["guide"] == guide_name
+
+    tours = load_tours()
+
+    return tours[
+        tours["guide"] == guide_name
     ]
 
 
+# ============================================================
+# CHUYỂN GIỜ THÀNH PHÚT
+# ============================================================
+
 def time_to_minutes(t):
+
     return t.hour * 60 + t.minute
 
 
-def has_conflict(guide_name, tour_date, start_time, end_time, ignore_id=None):
-    tours = st.session_state.tours
+# ============================================================
+# KIỂM TRA XUNG ĐỘT
+# ============================================================
+
+def has_conflict(
+    guide_name,
+    tour_date,
+    start_time,
+    end_time,
+    ignore_id=None
+):
+
+    tours = load_tours()
+
+    if tours.empty:
+        return False
 
     for _, row in tours.iterrows():
 
@@ -217,57 +650,123 @@ def has_conflict(guide_name, tour_date, start_time, end_time, ignore_id=None):
         if row["status"] != "Đã phân":
             continue
 
-        existing_start = time_to_minutes(row["start"])
-        existing_end = time_to_minutes(row["end"])
+        existing_start = time_to_minutes(
+            row["start"]
+        )
 
-        new_start = time_to_minutes(start_time)
-        new_end = time_to_minutes(end_time)
+        existing_end = time_to_minutes(
+            row["end"]
+        )
 
-        # Có giao nhau
-        if new_start < existing_end and new_end > existing_start:
+        new_start = time_to_minutes(
+            start_time
+        )
+
+        new_end = time_to_minutes(
+            end_time
+        )
+
+        # Trùng thời gian
+        if (
+            new_start < existing_end
+            and
+            new_end > existing_start
+        ):
             return True
 
-        # Khoảng nghỉ tối thiểu 2 tiếng
-        if abs(new_start - existing_end) < 120:
+        # Không đủ 2 giờ nghỉ
+        if abs(
+            new_start - existing_end
+        ) < 120:
             return True
 
-        if abs(existing_start - new_end) < 120:
+        if abs(
+            existing_start - new_end
+        ) < 120:
             return True
 
     return False
 
 
-def calculate_guide_score(guide, tour):
+# ============================================================
+# TÍNH ĐIỂM HDV
+# ============================================================
+
+def calculate_guide_score(
+    guide,
+    tour
+):
+
     score = 0
 
-    # Ngôn ngữ
+    # --------------------------------------------------------
+    # NGÔN NGỮ
+    # --------------------------------------------------------
+
     if guide["languages"]:
-        if tour["language"].lower() in guide["languages"].lower():
+
+        if (
+            str(tour["language"]).lower()
+            in
+            str(guide["languages"]).lower()
+        ):
             score += 35
 
-    # Khu vực
+    # --------------------------------------------------------
+    # KHU VỰC
+    # --------------------------------------------------------
+
     if guide["areas"]:
-        if tour["location"].lower() in guide["areas"].lower():
+
+        if (
+            str(tour["location"]).lower()
+            in
+            str(guide["areas"]).lower()
+        ):
             score += 25
 
-    # Chuyên môn
+    # --------------------------------------------------------
+    # CHUYÊN MÔN
+    # --------------------------------------------------------
+
     if guide["specialty"]:
-        if tour["tour_type"].lower() in guide["specialty"].lower():
+
+        if (
+            str(tour["tour_type"]).lower()
+            in
+            str(guide["specialty"]).lower()
+        ):
             score += 20
 
-    # Rating
-    score += float(guide["rating"]) * 3
+    # --------------------------------------------------------
+    # RATING
+    # --------------------------------------------------------
 
-    # Tải công việc
-    current = get_shift_count(guide["name"])
-    max_shift = int(guide["max_shifts"])
+    score += float(
+        guide["rating"]
+    ) * 3
+
+    # --------------------------------------------------------
+    # TẢI CÔNG VIỆC
+    # --------------------------------------------------------
+
+    current = get_shift_count(
+        guide["name"]
+    )
+
+    max_shift = int(
+        guide["max_shifts"]
+    )
 
     if current < max_shift:
         score += 15
     else:
         score -= 30
 
-    # Không trùng lịch
+    # --------------------------------------------------------
+    # XUNG ĐỘT
+    # --------------------------------------------------------
+
     if has_conflict(
         guide["name"],
         tour["date"],
@@ -276,18 +775,31 @@ def calculate_guide_score(guide, tour):
     ):
         score -= 100
 
-    return round(score, 2)
+    return round(
+        score,
+        2
+    )
 
+
+# ============================================================
+# ĐỀ XUẤT HDV
+# ============================================================
 
 def recommend_guides(tour):
+
+    guides = load_guides()
+
     recommendations = []
 
-    for _, guide in st.session_state.guides.iterrows():
+    for _, guide in guides.iterrows():
 
         if guide["status"] != "Sẵn sàng":
             continue
 
-        score = calculate_guide_score(guide, tour)
+        score = calculate_guide_score(
+            guide,
+            tour
+        )
 
         conflict = has_conflict(
             guide["name"],
@@ -302,13 +814,22 @@ def recommend_guides(tour):
             "Kinh nghiệm": guide["specialty"],
             "Ngôn ngữ": guide["languages"],
             "Khu vực": guide["areas"],
-            "Số ca hiện tại": get_shift_count(guide["name"]),
-            "Trùng lịch": "Có" if conflict else "Không"
+            "Số ca hiện tại": get_shift_count(
+                guide["name"]
+            ),
+            "Trùng lịch": (
+                "Có"
+                if conflict
+                else "Không"
+            )
         })
 
-    result = pd.DataFrame(recommendations)
+    result = pd.DataFrame(
+        recommendations
+    )
 
     if not result.empty:
+
         result = result.sort_values(
             by="Điểm phù hợp",
             ascending=False
@@ -317,13 +838,69 @@ def recommend_guides(tour):
     return result
 
 
+# ============================================================
+# THÔNG BÁO
+# ============================================================
+
+def save_notification(
+    message,
+    level="info"
+):
+
+    conn = get_connection()
+
+    with conn.cursor() as cursor:
+
+        cursor.execute("""
+            INSERT INTO notifications
+            (
+                message,
+                level
+            )
+            VALUES
+            (%s,%s)
+        """, (
+            message,
+            level
+        ))
+
+    conn.commit()
+
+
+def load_notifications():
+
+    conn = get_connection()
+
+    query = """
+        SELECT
+            id,
+            message,
+            level,
+            created_at
+        FROM notifications
+        ORDER BY id DESC
+        LIMIT 5
+    """
+
+    return pd.read_sql(
+        query,
+        conn
+    )
+
+
+# ============================================================
+# XUẤT EXCEL
+# ============================================================
+
 def dataframe_to_excel(df):
+
     output = io.BytesIO()
 
     with pd.ExcelWriter(
         output,
         engine="openpyxl"
     ) as writer:
+
         df.to_excel(
             writer,
             index=False,
@@ -334,10 +911,33 @@ def dataframe_to_excel(df):
 
 
 # ============================================================
+# KHỞI TẠO DATABASE
+# ============================================================
+
+try:
+
+    initialize_database()
+
+except Exception as e:
+
+    st.error(
+        "❌ Không thể kết nối MySQL Aiven."
+    )
+
+    st.code(
+        str(e)
+    )
+
+    st.stop()
+
+
+# ============================================================
 # SIDEBAR
 # ============================================================
 
-st.sidebar.title("🧭 TourGuide Manager")
+st.sidebar.title(
+    "🧭 TourGuide Manager"
+)
 
 menu = st.sidebar.radio(
     "Chức năng",
@@ -354,8 +954,27 @@ menu = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 
+# Kiểm tra kết nối
+
+connected, message = test_database_connection()
+
+if connected:
+
+    st.sidebar.success(
+        "🟢 MySQL Aiven: Đã kết nối"
+    )
+
+else:
+
+    st.sidebar.error(
+        "🔴 MySQL: Mất kết nối"
+    )
+
+st.sidebar.markdown("---")
+
 st.sidebar.info(
-    "Ứng dụng quản lý và phân ca hướng dẫn viên du lịch."
+    "Dữ liệu được lưu trực tiếp trên "
+    "MySQL Aiven Database."
 )
 
 # ============================================================
@@ -365,43 +984,80 @@ st.sidebar.info(
 if menu == "📊 Tổng quan":
 
     st.markdown(
-        '<div class="main-title">🧭 TourGuide Shift Manager</div>',
+        '<div class="main-title">'
+        '🧭 TourGuide Shift Manager'
+        '</div>',
         unsafe_allow_html=True
     )
 
     st.markdown(
         '<div class="sub-title">'
-        'Hệ thống quản lý và phân ca hướng dẫn viên du lịch'
+        'Hệ thống quản lý và phân ca '
+        'hướng dẫn viên du lịch'
         '</div>',
         unsafe_allow_html=True
     )
 
-    guides = st.session_state.guides
-    tours = st.session_state.tours
+    guides = load_guides()
+    tours = load_tours()
 
     total_guides = len(guides)
     total_tours = len(tours)
-    assigned = len(tours[tours["status"] == "Đã phân"])
-    unassigned = len(tours[tours["status"] == "Chưa phân"])
+
+    assigned = len(
+        tours[
+            tours["status"] == "Đã phân"
+        ]
+    )
+
+    unassigned = len(
+        tours[
+            tours["status"] == "Chưa phân"
+        ]
+    )
 
     c1, c2, c3, c4 = st.columns(4)
 
-    c1.metric("👨‍✈️ Tổng HDV", total_guides)
-    c2.metric("🚌 Tổng tour", total_tours)
-    c3.metric("✅ Đã phân", assigned)
-    c4.metric("⏳ Chưa phân", unassigned)
+    c1.metric(
+        "👨‍✈️ Tổng HDV",
+        total_guides
+    )
+
+    c2.metric(
+        "🚌 Tổng tour",
+        total_tours
+    )
+
+    c3.metric(
+        "✅ Đã phân",
+        assigned
+    )
+
+    c4.metric(
+        "⏳ Chưa phân",
+        unassigned
+    )
 
     st.markdown("---")
 
-    st.subheader("📅 Lịch tour gần nhất")
+    st.subheader(
+        "📅 Lịch tour"
+    )
 
     if not tours.empty:
 
         display = tours.copy()
 
-        display["date"] = display["date"].apply(
-            lambda x: x.strftime("%d/%m/%Y")
-            if hasattr(x, "strftime") else x
+        display["date"] = display[
+            "date"
+        ].apply(
+            lambda x:
+            x.strftime("%d/%m/%Y")
+            if hasattr(
+                x,
+                "strftime"
+            )
+            else x
         )
 
         st.dataframe(
@@ -425,25 +1081,41 @@ if menu == "📊 Tổng quan":
 
     st.markdown("---")
 
-    st.subheader("📊 Tải công việc của HDV")
+    st.subheader(
+        "📊 Tải công việc HDV"
+    )
 
     workload = []
 
     for _, guide in guides.iterrows():
+
+        count = get_shift_count(
+            guide["name"]
+        )
+
         workload.append({
             "HDV": guide["name"],
-            "Số ca": get_shift_count(guide["name"]),
+            "Số ca": count,
             "Tối đa": guide["max_shifts"],
             "Tỷ lệ sử dụng (%)": round(
-                get_shift_count(guide["name"]) /
-                max(guide["max_shifts"], 1) * 100,
+                count /
+                max(
+                    int(
+                        guide["max_shifts"]
+                    ),
+                    1
+                )
+                * 100,
                 1
             )
         })
 
-    workload_df = pd.DataFrame(workload)
+    workload_df = pd.DataFrame(
+        workload
+    )
 
     if not workload_df.empty:
+
         st.dataframe(
             workload_df,
             use_container_width=True,
@@ -457,57 +1129,85 @@ if menu == "📊 Tổng quan":
 
 elif menu == "👨‍✈️ Quản lý hướng dẫn viên":
 
-    st.title("👨‍✈️ Quản lý hướng dẫn viên")
+    st.title(
+        "👨‍✈️ Quản lý hướng dẫn viên"
+    )
 
-    tab1, tab2 = st.tabs([
-        "Danh sách HDV",
-        "Thêm HDV"
-    ])
+    tab1, tab2 = st.tabs(
+        [
+            "Danh sách HDV",
+            "Thêm HDV"
+        ]
+    )
 
     with tab1:
 
+        guides = load_guides()
+
         st.dataframe(
-            st.session_state.guides,
+            guides,
             use_container_width=True,
             hide_index=True
         )
 
-        st.markdown("### 🗑️ Xóa HDV")
+        st.markdown(
+            "### 🗑️ Xóa HDV"
+        )
 
-        if not st.session_state.guides.empty:
+        if not guides.empty:
 
             selected = st.selectbox(
                 "Chọn HDV",
-                st.session_state.guides["name"]
+                guides["name"]
             )
 
             if st.button(
-                "Xóa HDV",
-                type="secondary"
+                "Xóa HDV"
             ):
-                st.session_state.guides = (
-                    st.session_state.guides[
-                        st.session_state.guides["name"] != selected
-                    ]
+
+                delete_guide(
+                    selected
                 )
 
-                st.success("Đã xóa HDV.")
+                save_notification(
+                    f"Đã xóa HDV {selected}.",
+                    "info"
+                )
+
+                st.success(
+                    "Đã xóa HDV."
+                )
+
                 st.rerun()
 
     with tab2:
 
-        with st.form("add_guide"):
+        with st.form(
+            "add_guide"
+        ):
 
-            name = st.text_input("Họ và tên")
-            phone = st.text_input("Số điện thoại")
+            name = st.text_input(
+                "Họ và tên"
+            )
+
+            phone = st.text_input(
+                "Số điện thoại"
+            )
+
             languages = st.text_input(
                 "Ngôn ngữ",
-                placeholder="Ví dụ: Tiếng Việt, English"
+                placeholder=(
+                    "Ví dụ: Tiếng Việt, English"
+                )
             )
+
             areas = st.text_input(
                 "Khu vực hoạt động",
-                placeholder="Ví dụ: Vũng Tàu, Phú Quốc"
+                placeholder=(
+                    "Ví dụ: Vũng Tàu, Phú Quốc"
+                )
             )
+
             specialty = st.selectbox(
                 "Chuyên môn",
                 [
@@ -542,32 +1242,48 @@ elif menu == "👨‍✈️ Quản lý hướng dẫn viên":
             if submitted:
 
                 if not name.strip():
-                    st.error("Vui lòng nhập họ tên.")
+
+                    st.error(
+                        "Vui lòng nhập họ tên."
+                    )
+
                 else:
 
-                    new_guide = pd.DataFrame([{
-                        "id": "HDV" + uuid.uuid4().hex[:6].upper(),
-                        "name": name,
-                        "phone": phone,
-                        "languages": languages,
-                        "areas": areas,
-                        "specialty": specialty,
-                        "rating": rating,
-                        "max_shifts": max_shifts,
-                        "status": "Sẵn sàng"
-                    }])
-
-                    st.session_state.guides = pd.concat(
-                        [
-                            st.session_state.guides,
-                            new_guide
-                        ],
-                        ignore_index=True
+                    guide_id = (
+                        "HDV"
+                        +
+                        uuid.uuid4()
+                        .hex[:8]
+                        .upper()
                     )
 
-                    st.success(
-                        f"Đã thêm HDV {name}."
-                    )
+                    try:
+
+                        add_guide(
+                            guide_id,
+                            name,
+                            phone,
+                            languages,
+                            areas,
+                            specialty,
+                            rating,
+                            max_shifts
+                        )
+
+                        save_notification(
+                            f"Đã thêm HDV {name}.",
+                            "success"
+                        )
+
+                        st.success(
+                            f"Đã thêm HDV {name}."
+                        )
+
+                    except Exception as e:
+
+                        st.error(
+                            f"Không thể thêm HDV: {e}"
+                        )
 
 
 # ============================================================
@@ -576,24 +1292,32 @@ elif menu == "👨‍✈️ Quản lý hướng dẫn viên":
 
 elif menu == "🚌 Quản lý tour":
 
-    st.title("🚌 Quản lý tour")
+    st.title(
+        "🚌 Quản lý tour"
+    )
 
-    tab1, tab2 = st.tabs([
-        "Danh sách tour",
-        "Thêm tour"
-    ])
+    tab1, tab2 = st.tabs(
+        [
+            "Danh sách tour",
+            "Thêm tour"
+        ]
+    )
 
     with tab1:
 
+        tours = load_tours()
+
         st.dataframe(
-            st.session_state.tours,
+            tours,
             use_container_width=True,
             hide_index=True
         )
 
     with tab2:
 
-        with st.form("add_tour"):
+        with st.form(
+            "add_tour"
+        ):
 
             tour_name = st.text_input(
                 "Tên tour"
@@ -607,12 +1331,14 @@ elif menu == "🚌 Quản lý tour":
             col1, col2 = st.columns(2)
 
             with col1:
+
                 start_time = st.time_input(
                     "Giờ bắt đầu",
                     value=time(7, 30)
                 )
 
             with col2:
+
                 end_time = st.time_input(
                     "Giờ kết thúc",
                     value=time(17, 0)
@@ -670,41 +1396,57 @@ elif menu == "🚌 Quản lý tour":
             if submitted:
 
                 if not tour_name.strip():
-                    st.error("Vui lòng nhập tên tour.")
+
+                    st.error(
+                        "Vui lòng nhập tên tour."
+                    )
 
                 elif end_time <= start_time:
+
                     st.error(
-                        "Giờ kết thúc phải sau giờ bắt đầu."
+                        "Giờ kết thúc phải sau "
+                        "giờ bắt đầu."
                     )
 
                 else:
 
-                    new_tour = pd.DataFrame([{
-                        "id": "TOUR" + uuid.uuid4().hex[:6].upper(),
-                        "tour_name": tour_name,
-                        "date": tour_date,
-                        "start": start_time,
-                        "end": end_time,
-                        "location": location,
-                        "tour_type": tour_type,
-                        "language": language,
-                        "guests": guests,
-                        "priority": priority,
-                        "guide": "",
-                        "status": "Chưa phân"
-                    }])
-
-                    st.session_state.tours = pd.concat(
-                        [
-                            st.session_state.tours,
-                            new_tour
-                        ],
-                        ignore_index=True
+                    tour_id = (
+                        "TOUR"
+                        +
+                        uuid.uuid4()
+                        .hex[:8]
+                        .upper()
                     )
 
-                    st.success(
-                        f"Đã tạo tour: {tour_name}"
-                    )
+                    try:
+
+                        add_tour(
+                            tour_id,
+                            tour_name,
+                            tour_date,
+                            start_time,
+                            end_time,
+                            location,
+                            tour_type,
+                            language,
+                            guests,
+                            priority
+                        )
+
+                        save_notification(
+                            f"Đã tạo tour {tour_name}.",
+                            "success"
+                        )
+
+                        st.success(
+                            f"Đã tạo tour: {tour_name}"
+                        )
+
+                    except Exception as e:
+
+                        st.error(
+                            f"Không thể tạo tour: {e}"
+                        )
 
 
 # ============================================================
@@ -713,9 +1455,12 @@ elif menu == "🚌 Quản lý tour":
 
 elif menu == "📅 Phân ca theo ngày":
 
-    st.title("📅 Phân ca hướng dẫn viên theo ngày")
+    st.title(
+        "📅 Phân ca hướng dẫn viên theo ngày"
+    )
 
-    tours = st.session_state.tours
+    tours = load_tours()
+    guides = load_guides()
 
     selected_date = st.date_input(
         "Chọn ngày",
@@ -729,20 +1474,27 @@ elif menu == "📅 Phân ca theo ngày":
     if daily_tours.empty:
 
         st.info(
-            "Không có tour nào trong ngày được chọn."
+            "Không có tour nào trong ngày "
+            "được chọn."
         )
 
     else:
 
-        for index, row in daily_tours.iterrows():
+        for _, row in daily_tours.iterrows():
 
-            with st.container(border=True):
+            with st.container(
+                border=True
+            ):
 
-                c1, c2, c3 = st.columns([3, 2, 2])
+                c1, c2, c3 = st.columns(
+                    [3, 2, 2]
+                )
 
                 with c1:
+
                     st.markdown(
-                        f"### 🚌 {row['tour_name']}"
+                        f"### 🚌 "
+                        f"{row['tour_name']}"
                     )
 
                     st.write(
@@ -753,23 +1505,36 @@ elif menu == "📅 Phân ca theo ngày":
                 with c2:
 
                     st.write(
-                        f"🕐 {row['start']} - {row['end']}"
+                        f"🕐 {row['start']} - "
+                        f"{row['end']}"
                     )
 
                     st.write(
                         f"🌐 {row['language']}"
                     )
 
+                    st.write(
+                        f"⭐ {row['priority']}"
+                    )
+
                 with c3:
 
-                    current_guide = row["guide"]
+                    guide_options = [
+                        "-- Chưa phân --"
+                    ] + list(
+                        guides["name"]
+                    )
 
-                    guide_options = ["-- Chưa phân --"] + \
-                        list(st.session_state.guides["name"])
+                    current_guide = (
+                        row["guide"]
+                    )
 
                     current_index = (
-                        guide_options.index(current_guide)
-                        if current_guide in guide_options
+                        guide_options.index(
+                            current_guide
+                        )
+                        if current_guide
+                        in guide_options
                         else 0
                     )
 
@@ -777,29 +1542,37 @@ elif menu == "📅 Phân ca theo ngày":
                         "HDV",
                         guide_options,
                         index=current_index,
-                        key=f"guide_{row['id']}"
+                        key=(
+                            f"guide_"
+                            f"{row['id']}"
+                        )
                     )
 
                     if st.button(
                         "💾 Lưu phân ca",
-                        key=f"save_{row['id']}"
+                        key=(
+                            f"save_"
+                            f"{row['id']}"
+                        )
                     ):
 
-                        if selected_guide == "-- Chưa phân --":
+                        if (
+                            selected_guide
+                            == "-- Chưa phân --"
+                        ):
 
-                            st.session_state.tours.at[
-                                index,
-                                "guide"
-                            ] = ""
-
-                            st.session_state.tours.at[
-                                index,
-                                "status"
-                            ] = "Chưa phân"
+                            update_tour_assignment(
+                                row["id"],
+                                "",
+                                "Chưa phân"
+                            )
 
                             st.warning(
-                                "Tour đang ở trạng thái chưa phân."
+                                "Tour đang ở "
+                                "trạng thái chưa phân."
                             )
+
+                            st.rerun()
 
                         else:
 
@@ -814,26 +1587,26 @@ elif menu == "📅 Phân ca theo ngày":
                             if conflict:
 
                                 st.error(
-                                    f"⚠️ {selected_guide} "
-                                    "đang bị trùng lịch hoặc "
-                                    "không đủ thời gian nghỉ."
+                                    f"⚠️ "
+                                    f"{selected_guide} "
+                                    "đang bị trùng lịch "
+                                    "hoặc không đủ "
+                                    "thời gian nghỉ."
                                 )
 
                             else:
 
-                                st.session_state.tours.at[
-                                    index,
-                                    "guide"
-                                ] = selected_guide
-
-                                st.session_state.tours.at[
-                                    index,
-                                    "status"
-                                ] = "Đã phân"
+                                update_tour_assignment(
+                                    row["id"],
+                                    selected_guide,
+                                    "Đã phân"
+                                )
 
                                 save_notification(
-                                    f"Đã phân {row['tour_name']} "
-                                    f"cho {selected_guide}.",
+                                    f"Đã phân "
+                                    f"{row['tour_name']} "
+                                    f"cho "
+                                    f"{selected_guide}.",
                                     "success"
                                 )
 
@@ -841,43 +1614,59 @@ elif menu == "📅 Phân ca theo ngày":
                                     "Đã lưu phân ca."
                                 )
 
+                                st.rerun()
+
     st.markdown("---")
 
-    st.subheader("📌 Tóm tắt ca trong ngày")
+    st.subheader(
+        "📌 Tóm tắt ca trong ngày"
+    )
 
     if not daily_tours.empty:
 
-        summary = daily_tours[
-            daily_tours["guide"] != ""
-        ].groupby("guide").size().reset_index(
-            name="Số ca"
+        summary = (
+            daily_tours[
+                daily_tours["guide"] != ""
+            ]
+            .groupby("guide")
+            .size()
+            .reset_index(
+                name="Số ca"
+            )
         )
 
         if not summary.empty:
+
             st.dataframe(
                 summary,
                 use_container_width=True,
                 hide_index=True
             )
+
         else:
-            st.info("Chưa có HDV nào được phân.")
+
+            st.info(
+                "Chưa có HDV nào được phân."
+            )
 
 
 # ============================================================
-# 5. TRỢ LÝ XẾP CA THÔNG MINH
+# 5. TRỢ LÝ XẾP CA
 # ============================================================
 
 elif menu == "🤖 Trợ lý xếp ca":
 
-    st.title("🤖 Trợ lý xếp ca thông minh")
-
-    st.write(
-        "Hệ thống chấm điểm HDV dựa trên ngôn ngữ, "
-        "khu vực, chuyên môn, rating, tải công việc "
-        "và xung đột lịch."
+    st.title(
+        "🤖 Trợ lý xếp ca thông minh"
     )
 
-    tours = st.session_state.tours
+    st.write(
+        "Hệ thống chấm điểm HDV dựa trên "
+        "ngôn ngữ, khu vực, chuyên môn, "
+        "rating, tải công việc và xung đột lịch."
+    )
+
+    tours = load_tours()
 
     unassigned = tours[
         tours["status"] == "Chưa phân"
@@ -886,7 +1675,8 @@ elif menu == "🤖 Trợ lý xếp ca":
     if unassigned.empty:
 
         st.success(
-            "🎉 Tất cả tour hiện tại đã được phân ca."
+            "🎉 Tất cả tour hiện tại "
+            "đã được phân ca."
         )
 
     else:
@@ -905,18 +1695,23 @@ elif menu == "🤖 Trợ lý xếp ca":
             tours["id"] == selected_id
         ].iloc[0]
 
-        st.markdown("### 📋 Thông tin tour")
+        st.markdown(
+            "### 📋 Thông tin tour"
+        )
 
         info1, info2, info3, info4 = st.columns(4)
 
         info1.metric(
             "Ngày",
-            tour["date"].strftime("%d/%m/%Y")
+            tour["date"].strftime(
+                "%d/%m/%Y"
+            )
         )
 
         info2.metric(
             "Thời gian",
-            f"{tour['start']} - {tour['end']}"
+            f"{tour['start']} - "
+            f"{tour['end']}"
         )
 
         info3.metric(
@@ -934,8 +1729,10 @@ elif menu == "🤖 Trợ lý xếp ca":
             type="primary"
         ):
 
-            recommendations = recommend_guides(
-                tour
+            recommendations = (
+                recommend_guides(
+                    tour
+                )
             )
 
             if recommendations.empty:
@@ -947,7 +1744,7 @@ elif menu == "🤖 Trợ lý xếp ca":
             else:
 
                 st.subheader(
-                    "🎯 Danh sách HDV được đề xuất"
+                    "🎯 HDV được đề xuất"
                 )
 
                 st.dataframe(
@@ -957,7 +1754,9 @@ elif menu == "🤖 Trợ lý xếp ca":
                 )
 
                 valid = recommendations[
-                    recommendations["Trùng lịch"] == "Không"
+                    recommendations[
+                        "Trùng lịch"
+                    ] == "Không"
                 ]
 
                 if not valid.empty:
@@ -968,45 +1767,60 @@ elif menu == "🤖 Trợ lý xếp ca":
                         f"""
                         <div class="success-box">
                         <b>💡 Gợi ý từ hệ thống:</b><br>
-                        {best["HDV"]}<br>
-                        Điểm phù hợp: {best["Điểm phù hợp"]}<br>
-                        Chuyên môn: {best["Kinh nghiệm"]}<br>
-                        Khu vực: {best["Khu vực"]}
+                        HDV: {best["HDV"]}<br>
+                        Điểm phù hợp:
+                        {best["Điểm phù hợp"]}<br>
+                        Chuyên môn:
+                        {best["Kinh nghiệm"]}<br>
+                        Khu vực:
+                        {best["Khu vực"]}<br>
+                        Số ca hiện tại:
+                        {best["Số ca hiện tại"]}
                         </div>
                         """,
                         unsafe_allow_html=True
                     )
 
                     if st.button(
-                        f"✅ Phân tour cho {best['HDV']}"
+                        f"✅ Phân tour cho "
+                        f"{best['HDV']}"
                     ):
 
-                        idx = st.session_state.tours[
-                            st.session_state.tours["id"]
-                            == selected_id
-                        ].index[0]
-
-                        st.session_state.tours.at[
-                            idx,
-                            "guide"
-                        ] = best["HDV"]
-
-                        st.session_state.tours.at[
-                            idx,
-                            "status"
-                        ] = "Đã phân"
-
-                        save_notification(
-                            f"Trợ lý đã phân "
-                            f"{tour['tour_name']} "
-                            f"cho {best['HDV']}.",
-                            "success"
+                        conflict = has_conflict(
+                            best["HDV"],
+                            tour["date"],
+                            tour["start"],
+                            tour["end"],
+                            ignore_id=tour["id"]
                         )
 
-                        st.success(
-                            "Đã phân ca thành công!"
-                        )
-                        st.rerun()
+                        if conflict:
+
+                            st.error(
+                                "Không thể phân vì "
+                                "HDV bị xung đột lịch."
+                            )
+
+                        else:
+
+                            update_tour_assignment(
+                                tour["id"],
+                                best["HDV"],
+                                "Đã phân"
+                            )
+
+                            save_notification(
+                                f"Trợ lý đã phân "
+                                f"{tour['tour_name']} "
+                                f"cho {best['HDV']}.",
+                                "success"
+                            )
+
+                            st.success(
+                                "Đã phân ca thành công!"
+                            )
+
+                            st.rerun()
 
 
 # ============================================================
@@ -1015,9 +1829,11 @@ elif menu == "🤖 Trợ lý xếp ca":
 
 elif menu == "⚠️ Kiểm tra xung đột":
 
-    st.title("⚠️ Kiểm tra xung đột lịch")
+    st.title(
+        "⚠️ Kiểm tra xung đột lịch"
+    )
 
-    tours = st.session_state.tours
+    tours = load_tours()
 
     assigned = tours[
         tours["status"] == "Đã phân"
@@ -1025,7 +1841,9 @@ elif menu == "⚠️ Kiểm tra xung đột":
 
     conflicts = []
 
-    for guide_name in assigned["guide"].unique():
+    for guide_name in assigned[
+        "guide"
+    ].unique():
 
         guide_tours = assigned[
             assigned["guide"] == guide_name
@@ -1039,14 +1857,20 @@ elif menu == "⚠️ Kiểm tra xung đột":
 
             if previous is not None:
 
-                if row["date"] == previous["date"]:
+                if (
+                    row["date"]
+                    ==
+                    previous["date"]
+                ):
 
                     prev_end = time_to_minutes(
                         previous["end"]
                     )
 
-                    current_start = time_to_minutes(
-                        row["start"]
+                    current_start = (
+                        time_to_minutes(
+                            row["start"]
+                        )
                     )
 
                     if current_start < prev_end:
@@ -1054,19 +1878,38 @@ elif menu == "⚠️ Kiểm tra xung đột":
                         conflicts.append({
                             "HDV": guide_name,
                             "Ngày": row["date"],
-                            "Tour 1": previous["tour_name"],
-                            "Tour 2": row["tour_name"],
-                            "Lỗi": "Trùng thời gian"
+                            "Tour 1":
+                                previous[
+                                    "tour_name"
+                                ],
+                            "Tour 2":
+                                row[
+                                    "tour_name"
+                                ],
+                            "Lỗi":
+                                "Trùng thời gian"
                         })
 
-                    elif current_start - prev_end < 120:
+                    elif (
+                        current_start
+                        -
+                        prev_end
+                        < 120
+                    ):
 
                         conflicts.append({
                             "HDV": guide_name,
                             "Ngày": row["date"],
-                            "Tour 1": previous["tour_name"],
-                            "Tour 2": row["tour_name"],
-                            "Lỗi": "Thời gian nghỉ dưới 2 giờ"
+                            "Tour 1":
+                                previous[
+                                    "tour_name"
+                                ],
+                            "Tour 2":
+                                row[
+                                    "tour_name"
+                                ],
+                            "Lỗi":
+                                "Thời gian nghỉ dưới 2 giờ"
                         })
 
             previous = row
@@ -1087,7 +1930,8 @@ elif menu == "⚠️ Kiểm tra xung đột":
         st.markdown(
             f"""
             <div class="danger-box">
-            ⚠️ Phát hiện {len(conflicts)} vấn đề cần xử lý.
+            ⚠️ Phát hiện {len(conflicts)}
+            vấn đề cần xử lý.
             </div>
             """,
             unsafe_allow_html=True
@@ -1101,11 +1945,15 @@ elif menu == "⚠️ Kiểm tra xung đột":
 
     st.markdown("---")
 
-    st.subheader("📌 Kiểm tra tải công việc")
+    st.subheader(
+        "📌 Kiểm tra tải công việc"
+    )
+
+    guides = load_guides()
 
     workload = []
 
-    for _, guide in st.session_state.guides.iterrows():
+    for _, guide in guides.iterrows():
 
         count = get_shift_count(
             guide["name"]
@@ -1117,8 +1965,12 @@ elif menu == "⚠️ Kiểm tra xung đột":
             "Giới hạn": guide["max_shifts"],
             "Trạng thái":
                 "⚠️ Quá tải"
-                if count > guide["max_shifts"]
-                else "✅ Bình thường"
+                if count >
+                int(
+                    guide["max_shifts"]
+                )
+                else
+                "✅ Bình thường"
         })
 
     st.dataframe(
@@ -1134,12 +1986,16 @@ elif menu == "⚠️ Kiểm tra xung đột":
 
 elif menu == "📈 Báo cáo & xuất dữ liệu":
 
-    st.title("📈 Báo cáo & xuất dữ liệu")
+    st.title(
+        "📈 Báo cáo & xuất dữ liệu"
+    )
 
-    tours = st.session_state.tours
-    guides = st.session_state.guides
+    tours = load_tours()
+    guides = load_guides()
 
-    st.subheader("📊 Thống kê")
+    st.subheader(
+        "📊 Thống kê"
+    )
 
     col1, col2, col3 = st.columns(3)
 
@@ -1152,7 +2008,8 @@ elif menu == "📈 Báo cáo & xuất dữ liệu":
         "Tour đã phân",
         len(
             tours[
-                tours["status"] == "Đã phân"
+                tours["status"]
+                == "Đã phân"
             ]
         )
     )
@@ -1161,14 +2018,17 @@ elif menu == "📈 Báo cáo & xuất dữ liệu":
         "Tour chưa phân",
         len(
             tours[
-                tours["status"] == "Chưa phân"
+                tours["status"]
+                == "Chưa phân"
             ]
         )
     )
 
     st.markdown("---")
 
-    st.subheader("📋 Báo cáo phân ca")
+    st.subheader(
+        "📋 Báo cáo phân ca"
+    )
 
     report = tours[
         [
@@ -1193,6 +2053,10 @@ elif menu == "📈 Báo cáo & xuất dữ liệu":
         hide_index=True
     )
 
+    # --------------------------------------------------------
+    # EXCEL
+    # --------------------------------------------------------
+
     excel_data = dataframe_to_excel(
         report
     )
@@ -1201,8 +2065,13 @@ elif menu == "📈 Báo cáo & xuất dữ liệu":
         label="📥 Tải báo cáo Excel",
         data=excel_data,
         file_name=(
-            f"lich_phan_ca_"
-            f"{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+            "lich_phan_ca_"
+            +
+            datetime.now().strftime(
+                "%Y%m%d_%H%M"
+            )
+            +
+            ".xlsx"
         ),
         mime=(
             "application/vnd.openxmlformats-"
@@ -1210,9 +2079,15 @@ elif menu == "📈 Báo cáo & xuất dữ liệu":
         )
     )
 
+    # --------------------------------------------------------
+    # CSV
+    # --------------------------------------------------------
+
     csv_data = report.to_csv(
         index=False
-    ).encode("utf-8-sig")
+    ).encode(
+        "utf-8-sig"
+    )
 
     st.download_button(
         label="📥 Tải dữ liệu CSV",
@@ -1223,7 +2098,9 @@ elif menu == "📈 Báo cáo & xuất dữ liệu":
 
     st.markdown("---")
 
-    st.subheader("📊 Thống kê theo HDV")
+    st.subheader(
+        "📊 Thống kê theo HDV"
+    )
 
     guide_report = []
 
@@ -1239,11 +2116,14 @@ elif menu == "📈 Báo cáo & xuất dữ liệu":
             "Số ca": count,
             "Giới hạn": guide["max_shifts"],
             "Rating": guide["rating"],
-            "Tình trạng": guide["status"]
+            "Tình trạng":
+                guide["status"]
         })
 
     st.dataframe(
-        pd.DataFrame(guide_report),
+        pd.DataFrame(
+            guide_report
+        ),
         use_container_width=True,
         hide_index=True
     )
@@ -1255,26 +2135,53 @@ elif menu == "📈 Báo cáo & xuất dữ liệu":
 
 st.sidebar.markdown("---")
 
-st.sidebar.subheader("🔔 Thông báo")
+st.sidebar.subheader(
+    "🔔 Thông báo"
+)
 
-if st.session_state.notifications:
+try:
 
-    for notification in st.session_state.notifications[:5]:
+    notifications = (
+        load_notifications()
+    )
 
-        if notification["level"] == "success":
-            st.sidebar.success(
-                notification["message"]
+    if not notifications.empty:
+
+        for _, notification in (
+            notifications.iterrows()
+        ):
+
+            message = (
+                f"{notification['message']}"
             )
-        else:
-            st.sidebar.info(
-                notification["message"]
-            )
 
-else:
+            if (
+                notification["level"]
+                == "success"
+            ):
+
+                st.sidebar.success(
+                    message
+                )
+
+            else:
+
+                st.sidebar.info(
+                    message
+                )
+
+    else:
+
+        st.sidebar.caption(
+            "Chưa có thông báo mới."
+        )
+
+except Exception:
 
     st.sidebar.caption(
-        "Chưa có thông báo mới."
+        "Không tải được thông báo."
     )
+
 
 # ============================================================
 # FOOTER
@@ -1284,5 +2191,6 @@ st.markdown("---")
 
 st.caption(
     "🧭 TourGuide Shift Manager | "
-    "Ứng dụng quản lý phân ca hướng dẫn viên du lịch"
+    "MySQL Aiven Database | "
+    "Quản lý phân ca hướng dẫn viên du lịch"
 )
